@@ -1,4 +1,5 @@
 import os
+Import("env")
 
 with open(".env") as f:
     for line in f:
@@ -9,5 +10,5 @@ with open(".env") as f:
 
 env.Append(CPPDEFINES=[
     ("WIFI_SSID", '\\"%s\\"' % os.environ["WELLWATEREDNTWK"]),
-    ("WIFI_PASSWORD", '\\"%s\\"' % os.environ["WELLWATEREDKEY"]),
+    ("WIFI_PSKY", '\\"%s\\"' % os.environ["WELLWATEREDKEY"]),
 ])
