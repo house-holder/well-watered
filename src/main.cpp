@@ -2,8 +2,6 @@
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
 
-AsyncWebServer server(80);
-
 enum LEDMode { ON, OFF, FLASH };
 
 struct StatLED {
@@ -26,11 +24,11 @@ void updateLED(StatLED &LED) {
 			break;
 		case FLASH: {
 			unsigned long runtime = now - LED.start;
-			if (status == LOW && runtime >= LED.cycleTime) { // restart cycle
+			if (runtime >= LED.cycleTime && status == LOW) {
 				digitalWrite(LED.pin, HIGH);
 				LED.start = now;					
-			} else { // mid-cycle, just turn off LED if onTime expires
-				if (runtime >= LED.onTime) {
+			} else {
+				if (runtime >= LED.onTime && status == HIGH) {
 					digitalWrite(LED.pin, LOW);
 				}
 			}
@@ -39,44 +37,56 @@ void updateLED(StatLED &LED) {
 	}
 }
 
-StatLED Ok = { 23, 25, 475, OFF, 0 };
-StatLED Warn = { 22, 250, 1750, OFF, 0 };
+StatLED Ok =	 { 13, 100, 4900, OFF, 0 };
+StatLED Warn =	 { 14, 250, 1750, OFF, 0 };
+StatLED Shed =	 { 16, 500, 4500, OFF, 0 };
+StatLED House =  { 17, 500, 4500, OFF, 0 };
+StatLED Garden = { 18, 500, 4500, OFF, 0 };
 
-struct Zone {
-	const char* name;
-	int pin;
-	bool active;
-};
+// struct Zone {
+// 	const char* name;
+// 	int pin;
+// 	bool running;
+// 	StatLED indication;
+// };
+//
+// Zone zones[3] = {
+// 	{ "Shed faucet",   33, false, Shed },
+// 	{ "House faucet",  34, false, House },
+// 	{ "Garden faucet", 35, false, Garden },
+// };
 
-Zone zones[3] = {
-	{ "Shed faucet",   16, false },
-	{ "House faucet",  17, false },
-	{ "Garden faucet", 18, false },
-};
+AsyncWebServer server(80);
 
 // Setup ----------------------------------------------------------------------
 void setup() {
 	Serial.begin(115200);
-
 	unsigned long timer = 0;
+
 	pinMode(Ok.pin, OUTPUT);
 	pinMode(Warn.pin, OUTPUT);
-	for (int i=0; i<3; i++) {
-		pinMode(zones[i].pin, OUTPUT);
-	}
+	pinMode(Shed.pin, OUTPUT);
+	pinMode(House.pin, OUTPUT);
+	pinMode(Garden.pin, OUTPUT);
 
-
+	Warn.mode = FLASH;
 	WiFi.begin(WIFI_SSID, WIFI_PSKY);
+
 	while (WiFi.status() != WL_CONNECTED) {
 		unsigned long now = millis();
-		Warn.mode = FLASH;
 		if (now - timer >= 100) {
 			Serial.print(".");
+			updateLED(Warn);
 			timer = now;
 		}
 	}
+
 	Serial.println("connected!");
 	Ok.mode = ON;
+	Warn.mode = ON;
+	Shed.mode = ON;
+	House.mode = ON;
+	Garden.mode = ON;
 
 	server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
 		request->send(200, "text/html", "<h1>well-watered</h1><p>works</p>");
@@ -88,6 +98,9 @@ void setup() {
 
 // Loop -----------------------------------------------------------------------
 void loop() {
-
-	updateLED(Ok); updateLED(Warn);
+	updateLED(Ok);
+	updateLED(Warn);
+	updateLED(Shed);
+	updateLED(House);
+	updateLED(Garden);
 }
