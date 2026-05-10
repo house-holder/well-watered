@@ -49,7 +49,6 @@ StatLED Garden = { 18, 500, 4500, OFF, 0 };
 // 	bool running;
 // 	StatLED indication;
 // };
-//
 // Zone zones[3] = {
 // 	{ "Shed faucet",   33, false, Shed },
 // 	{ "House faucet",  34, false, House },
@@ -96,11 +95,25 @@ void setup() {
 	Serial.printf("webserver running (%s)\n", WiFi.localIP().toString()); 
 }
 
-// Loop -----------------------------------------------------------------------
-void loop() {
+void updateAllLEDs() {
 	updateLED(Ok);
 	updateLED(Warn);
 	updateLED(Shed);
 	updateLED(House);
 	updateLED(Garden);
+}
+
+// Loop -----------------------------------------------------------------------
+void loop() {
+	if (Serial.available()) {
+		String cmd = Serial.readStringUntil('\n');
+		cmd.trim();
+		if (cmd == "rsc") {
+			Serial.println("[ Resource monitor ]");
+			Serial.printf("  Heap size: %d\n", ESP.getHeapSize());
+			Serial.printf("  Min heap:  %d\n", ESP.getMinFreeHeap());
+		}
+	}
+	
+	updateAllLEDs();
 }
