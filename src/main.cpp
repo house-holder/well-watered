@@ -1,5 +1,8 @@
 #include <WiFi.h>
+#include <time.h>
 #include <Arduino.h>
+#include <ESPmDNS.h>
+#include <LittleFS.h>
 #include <ESPAsyncWebServer.h>
 
 enum LEDMode { ON, OFF, FLASH };
@@ -71,6 +74,7 @@ void setup() {
 	Warn.mode = FLASH;
 	WiFi.begin(WIFI_SSID, WIFI_PSKY);
 
+	Serial.print("Connecting to network");
 	while (WiFi.status() != WL_CONNECTED) {
 		unsigned long now = millis();
 		if (now - timer >= 100) {
@@ -79,20 +83,45 @@ void setup() {
 			timer = now;
 		}
 	}
-
 	Serial.println("connected!");
-	Ok.mode = ON;
-	Warn.mode = ON;
-	Shed.mode = ON;
-	House.mode = ON;
-	Garden.mode = ON;
+
+	if (MDNS.begin("watering")) {
+		Serial.println("mDNS started: http://watering.local");
+	}
+
+	const long GMT_OFFSET = -6 * 3600;
+	const int DST_OFFSET  = 3600;
+
+	configTime(GMT_OFFSET, DST_OFFSET, "pool.ntp.org");
+	struct tm timeinfo;
+	timer = 0;
+	Serial.print("Syncing time...");
+	while (!getLocalTime(&timeinfo)) {
+		unsigned long now = millis();
+		if (now - timer >= 100) {
+			Serial.print(".");
+			updateLED(Warn);
+			timer = now;
+		}
+	}
+	Serial.println(&timeinfo, " synced: %H:%M:%S");
+
+	if (!LittleFS.begin()) {
+		Serial.println("LittleFS mount failed");
+		Warn.mode = FLASH;
+		return;
+	}
+	Serial.println("LittleFS mounted");
 
 	server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-		request->send(200, "text/html", "<h1>well-watered</h1><p>works</p>");
+		request->send(LittleFS, "/index.html", "text/html");
 	});
-	server.begin();
 
-	Serial.printf("webserver running (%s)\n", WiFi.localIP().toString()); 
+	server.begin();
+	Warn.mode = OFF;
+	Ok.mode = ON;
+
+	Serial.printf("Webserver running (%s)\n", WiFi.localIP().toString()); 
 }
 
 void updateAllLEDs() {
