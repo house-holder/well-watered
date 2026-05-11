@@ -1,3 +1,12 @@
+
+const zoneState = [ // countdown grace period to enable
+	{ mode: 'idle', timer: null, remaining: 0 },
+	{ mode: 'idle', timer: null, remaining: 0 },
+	{ mode: 'idle', timer: null, remaining: 0 },
+];
+
+const graceCountdown = 5;
+
 // setup functions ------------------------------------------------------------
 function updateClock() {
     const now = new Date();
@@ -77,13 +86,37 @@ async function init() {
 
     document.querySelectorAll('.override-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-            const zoneId = btn.dataset.zone;
-            const isActive = btn.classList.contains('active');
-            const action = isActive ? 'disable' : 'enable';
+            const zoneId = parseInt(btn.dataset.zone);
+			const state = zoneState[zoneId];
+			
+			if (state.mode === 'idle') {
+				state.mode = 'grace';
+				state.remaining = graceCountdown;
+				btn.textContent = `${state.remaining}s... Cancel`;
 
-            await fetch(`/api/zones/${zoneId}/${action}`, { method: 'POST' });
-            const data = await fetchState();
-            applyState(data);
+				state.timer = setInterval(async () => {
+					state.remaining--;
+					if (state.remaining > 0) {
+						btn.textContent = `${state.remaining}s... Cancel`;
+					} else {
+						clearInterval(state.timer);
+						await fetch(`/api/zones/${zoneId}/enable`, { method: 'POST' });
+						const data = await fetchState();
+						applyState(data);
+						state.mode = 'active';
+						btn.textContent = 'Disable';
+					}
+				}, 1000);
+			} else if (state.mode === 'grace') {
+				clearInterval(state.timer);
+				btn.textContent = 'Enable';
+				state.mode = 'idle';
+			} else if (state.mode === 'active') {
+				await fetch(`/api/zones/${zoneId}/disable`, { method: 'POST' });
+				const data = await fetchState();
+				applyState(data);
+				state.mode = 'idle';
+			}
         });
     });
 }
