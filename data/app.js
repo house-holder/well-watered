@@ -1,4 +1,3 @@
-
 const zoneState = [ // countdown grace period to enable
 	{ mode: 'idle', timer: null, remaining: 0 },
 	{ mode: 'idle', timer: null, remaining: 0 },
@@ -121,6 +120,19 @@ async function init() {
     });
 }
 
+async function fetchSchedule() {
+	const resp = await fetch('/api/schedule');
+	const data = await resp.json();
+	return data;
+}
+
+function applySchedule(data) {
+	// find card by 'data-zone'
+	// set correct day buttons to 'active' class
+	// set start/stop time pickers to stored values
+}
+
 init();
+
 updateClock();
 setInterval(updateClock, 1000);

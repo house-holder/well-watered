@@ -58,6 +58,49 @@ const Schedule DEFAULT_SCHEDULE = {
     .startHour = 6, .startMin = 0, .stopHour  = 7, .stopMin  = 15
 };
 
+struct Zone {
+	int pin;
+	bool running;
+	const char* name;
+	time_t startTime;
+	Schedule schedule;
+	StatLED indication;
+};
+
+Zone zones[3] = {
+	{ .pin=21, .name="Garden faucet", .schedule=DEFAULT_SCHEDULE,
+		.indication={ .pin=16, .onTime=200, .cycleTime=800 }, },
+	{ .pin=22, .name="House faucet",  .schedule=DEFAULT_SCHEDULE,
+		.indication={ .pin=17, .onTime=200, .cycleTime=800 }, },
+	{ .pin=23, .name="Shed faucet",   .schedule=DEFAULT_SCHEDULE,
+		.indication={ .pin=18, .onTime=200, .cycleTime=800 }, },
+};
+
+String getStateJSON() {
+    JsonDocument doc;
+    JsonArray zonesArr = doc["zones"].to<JsonArray>();
+
+    for (int i = 0; i < 3; i++) {
+        Zone& z = zones[i];
+        JsonObject obj = zonesArr.add<JsonObject>();
+        obj["id"] = i;
+        obj["name"] = z.name;
+        obj["running"] = z.running;
+        if (z.running && z.startTime > 0) {
+            char buf[6];
+            struct tm* t = localtime(&z.startTime);
+            strftime(buf, sizeof(buf), "%H:%M", t);
+            obj["since"] = buf;
+        } else {
+            obj["since"] = nullptr;
+        }
+    }
+
+    String output;
+    serializeJson(doc, output);
+    return output;
+}
+
 void saveSchedule() {
 	JsonDocument doc; JsonArray arr = doc["zones"].to<JsonArray>();
 
@@ -103,49 +146,6 @@ void loadSchedule() {
 	}
 }
 
-struct Zone {
-	int pin;
-	bool running;
-	const char* name;
-	time_t startTime;
-	Schedule schedule;
-	StatLED indication;
-};
-
-Zone zones[3] = {
-	{ .pin=21, .name="Garden faucet", .schedule=DEFAULT_SCHEDULE,
-		.indication={ .pin=16, .onTime=200, .cycleTime=800 }, },
-	{ .pin=22, .name="House faucet",  .schedule=DEFAULT_SCHEDULE,
-		.indication={ .pin=17, .onTime=200, .cycleTime=800 }, },
-	{ .pin=23, .name="Shed faucet",   .schedule=DEFAULT_SCHEDULE,
-		.indication={ .pin=18, .onTime=200, .cycleTime=800 }, },
-};
-
-String getStateJSON() {
-    JsonDocument doc;
-    JsonArray zonesArr = doc["zones"].to<JsonArray>();
-
-    for (int i = 0; i < 3; i++) {
-        Zone& z = zones[i];
-        JsonObject obj = zonesArr.add<JsonObject>();
-        obj["id"] = i;
-        obj["name"] = z.name;
-        obj["running"] = z.running;
-        if (z.running && z.startTime > 0) {
-            char buf[6];
-            struct tm* t = localtime(&z.startTime);
-            strftime(buf, sizeof(buf), "%H:%M", t);
-            obj["since"] = buf;
-        } else {
-            obj["since"] = nullptr;
-        }
-    }
-
-    String output;
-    serializeJson(doc, output);
-    return output;
-}
-
 AsyncWebServer server(80);
 
 // Setup ----------------------------------------------------------------------
@@ -171,6 +171,7 @@ void setup() {
 			timer = now;
 		}
 	}
+
     Warn.mode = OFF;
 	Serial.println(" connected.");
 	if (MDNS.begin("watering")) {
@@ -198,6 +199,7 @@ void setup() {
 		Serial.println("LittleFS mount failed");
 		Warn.mode = FLASH;
 		return;
+	}
 	
 	Serial.println("LittleFS mounted");
     loadSchedule();
@@ -216,6 +218,17 @@ void setup() {
 	// basic state
 	server.on("/api/state", HTTP_GET, [](AsyncWebServerRequest *request) {
 		request->send(200, "application/json", getStateJSON());
+	});
+
+	server.on("/api/schedule", HTTP_GET, [](AsyncWebServerRequest *request) {
+		File f = LittleFS.open("/save.json", "r");
+		if (!f) {
+			request->send(404, "text/plain", "not found");
+			return;
+		}
+		String content = f.readString();
+		f.close();
+		request->send(200, "application/json", content);
 	});
 
 	// valve toggle endpoints
@@ -242,6 +255,12 @@ void setup() {
 		}
 		zones[id].running = false;
 		zones[id].startTime = 0;
+		request->send(200, "application/json", "{\"ok\":true}");
+	});
+
+	server.on("/api/schedule/save", HTTP_POST, [](AsyncWebServerRequest *request) {
+		// we'll handle the body next
+		saveSchedule();
 		request->send(200, "application/json", "{\"ok\":true}");
 	});
 
