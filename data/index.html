@@ -1,10 +1,195 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <title>well-watered</title>
-    </head>
-    <body>
-        <h1>well-watered</h1>
-        <p>served from LittleFS.</p>
-    </body>
-</html>
+<head>
+    <meta charset="UTF-8" name="viewport" content="width=device-width, initial-scale=1">
+    <title>The Well-Watered Garden</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Watering Control Panel</h1>
+        <div id="clock">--:--:--</div>
+    </header>
+
+    <main>
+		<div class="zone-card" id="garden-faucet">
+			<div class="zone-header">
+				<h2>Garden Faucet</h2>
+				<div class="zone-status">
+					<span class="status-badge">OFF</span>
+					<span class="status-since"></span>
+				</div>
+			</div>
+
+			<div class="zone-schedule">
+				<div class="day-selector">
+					<button class="day" data-day="0">Sun</button>
+					<button class="day" data-day="1">Mon</button>
+					<button class="day" data-day="2">Tue</button>
+					<button class="day" data-day="3">Wed</button>
+					<button class="day" data-day="4">Thu</button>
+					<button class="day" data-day="5">Fri</button>
+					<button class="day" data-day="6">Sat</button>
+				</div>
+
+				<div class="zone-timing">
+					<label>Schedule start
+						<div class="time-picker">
+							<select class="t-hour"></select>
+							<span>:</span>
+							<select class="t-minute"></select>
+							<select class="t-ampm">
+								<option>AM</option>
+								<option>PM</option>
+							</select>
+						</div>
+					</label>
+					<label>Schedule stop
+						<div class="time-picker">
+							<select class="t-hour"></select>
+							<span>:</span>
+							<select class="t-minute"></select>
+							<select class="t-ampm">
+								<option>AM</option>
+								<option>PM</option>
+							</select>
+						</div>
+					</label>
+				</div>
+			</div>
+
+			<div class="zone-footer">
+				<div class="duration-picker">
+					<button class="dur-btn minus">−</button>
+					<span class="duration-display">2:00</span>
+					<button class="dur-btn plus">+</button>
+				</div>
+				<button class="override-btn" data-zone="0">Enable</button>
+			</div>
+
+			<div class="countdown-display" style="display:none">
+				<span class="countdown-text">--</span>
+			</div>
+		</div>
+		<div class="zone-card" id="house-faucet">
+			<div class="zone-header">
+				<h2>House Faucet</h2>
+				<div class="zone-status">
+					<span class="status-badge">OFF</span>
+					<span class="status-since"></span>
+				</div>
+			</div>
+
+			<div class="zone-schedule">
+				<div class="day-selector">
+					<button class="day" data-day="0">Sun</button>
+					<button class="day" data-day="1">Mon</button>
+					<button class="day" data-day="2">Tue</button>
+					<button class="day" data-day="3">Wed</button>
+					<button class="day" data-day="4">Thu</button>
+					<button class="day" data-day="5">Fri</button>
+					<button class="day" data-day="6">Sat</button>
+				</div>
+
+				<div class="zone-timing">
+					<label>Schedule start
+						<div class="time-picker">
+							<select class="t-hour"></select>
+							<span>:</span>
+							<select class="t-minute"></select>
+							<select class="t-ampm">
+								<option>AM</option>
+								<option>PM</option>
+							</select>
+						</div>
+					</label>
+					<label>Schedule stop
+						<div class="time-picker">
+							<select class="t-hour"></select>
+							<span>:</span>
+							<select class="t-minute"></select>
+							<select class="t-ampm">
+								<option>AM</option>
+								<option>PM</option>
+							</select>
+						</div>
+					</label>
+				</div>
+			</div>
+
+			<div class="zone-footer">
+				<div class="duration-picker">
+					<button class="dur-btn minus">−</button>
+					<span class="duration-display">2:00</span>
+					<button class="dur-btn plus">+</button>
+				</div>
+				<button class="override-btn" data-zone="1">Enable</button>
+			</div>
+
+			<div class="countdown-display" style="display:none">
+				<span class="countdown-text">--</span>
+			</div>
+		</div>
+		<div class="zone-card" id="shed-faucet">
+			<div class="zone-header">
+				<h2>Shed Faucet</h2>
+				<div class="zone-status">
+					<span class="status-badge">OFF</span>
+					<span class="status-since"></span>
+				</div>
+			</div>
+
+			<div class="zone-schedule">
+				<div class="day-selector">
+					<button class="day" data-day="0">Sun</button>
+					<button class="day" data-day="1">Mon</button>
+					<button class="day" data-day="2">Tue</button>
+					<button class="day" data-day="3">Wed</button>
+					<button class="day" data-day="4">Thu</button>
+					<button class="day" data-day="5">Fri</button>
+					<button class="day" data-day="6">Sat</button>
+				</div>
+
+				<div class="zone-timing">
+					<label>Schedule start
+						<div class="time-picker">
+							<select class="t-hour"></select>
+							<span>:</span>
+							<select class="t-minute"></select>
+							<select class="t-ampm">
+								<option>AM</option>
+								<option>PM</option>
+							</select>
+						</div>
+					</label>
+					<label>Schedule stop
+						<div class="time-picker">
+							<select class="t-hour"></select>
+							<span>:</span>
+							<select class="t-minute"></select>
+							<select class="t-ampm">
+								<option>AM</option>
+								<option>PM</option>
+							</select>
+						</div>
+					</label>
+				</div>
+			</div>
+
+			<div class="zone-footer">
+				<div class="duration-picker">
+					<button class="dur-btn minus">−</button>
+					<span class="duration-display">2:00</span>
+					<button class="dur-btn plus">+</button>
+				</div>
+				<button class="override-btn" data-zone="2">Enable</button>
+			</div>
+
+			<div class="countdown-display" style="display:none">
+				<span class="countdown-text">--</span>
+			</div>
+		</div>
+    </main>
+
+    <script src="app.js"></script>
+</body>

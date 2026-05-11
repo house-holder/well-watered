@@ -21,3 +21,5 @@ compiledb:
 run: upload uploadfs
 
 runmon: upload uploadfs monitor
+
+fsmon: uploadfs monitor

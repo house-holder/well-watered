@@ -42,21 +42,22 @@ void updateLED(StatLED &LED) {
 
 StatLED Ok =	 { 13, 100, 4900, OFF, 0 };
 StatLED Warn =	 { 14, 250, 1750, OFF, 0 };
-StatLED Shed =	 { 16, 500, 4500, OFF, 0 };
-StatLED House =  { 17, 500, 4500, OFF, 0 };
-StatLED Garden = { 18, 500, 4500, OFF, 0 };
+StatLED Shed =	 { 16, 200,  800, OFF, 0 };
+StatLED House =  { 17, 200,  800, OFF, 0 };
+StatLED Garden = { 18, 200,  800, OFF, 0 };
 
-// struct Zone {
-// 	const char* name;
-// 	int pin;
-// 	bool running;
-// 	StatLED indication;
-// };
-// Zone zones[3] = {
-// 	{ "Shed faucet",   33, false, Shed },
-// 	{ "House faucet",  34, false, House },
-// 	{ "Garden faucet", 35, false, Garden },
-// };
+struct Zone {
+	const char* name;
+	int pin;
+	bool running;
+	StatLED indication;
+};
+
+Zone zones[3] = {
+	{ "Garden faucet", 33, false, Garden },
+	{ "House faucet",  34, false, House },
+	{ "Shed faucet",   35, false, Shed },
+};
 
 AsyncWebServer server(80);
 
@@ -83,7 +84,7 @@ void setup() {
 			timer = now;
 		}
 	}
-	Serial.println("connected!");
+	Serial.println(" connected.");
 
 	if (MDNS.begin("watering")) {
 		Serial.println("mDNS started: http://watering.local");
@@ -104,7 +105,7 @@ void setup() {
 			timer = now;
 		}
 	}
-	Serial.println(&timeinfo, " synced: %H:%M:%S");
+	Serial.println(&timeinfo, " synced. Time now: %H:%M:%S");
 
 	if (!LittleFS.begin()) {
 		Serial.println("LittleFS mount failed");
@@ -115,6 +116,12 @@ void setup() {
 
 	server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
 		request->send(LittleFS, "/index.html", "text/html");
+	});
+	server.on("/app.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+		request->send(LittleFS, "/app.js", "text/javascript");
+	});
+	server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
+		request->send(LittleFS, "/style.css", "text/css");
 	});
 
 	server.begin();
