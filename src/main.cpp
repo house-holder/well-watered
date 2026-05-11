@@ -59,12 +59,13 @@ const Schedule DEFAULT_SCHEDULE = {
 };
 
 void saveSchedule() {
-	JsonDocument doc;
-	JsonArray arr = doc["zones"].to<JsonArray>();
+	JsonDocument doc; JsonArray arr = doc["zones"].to<JsonArray>();
+
 	for (int i = 0; i < 3; i++) {
 		JsonObject obj = arr.add<JsonObject>();
 		obj["id"] = i;
 		JsonArray days = obj["days"].to<JsonArray>();
+
 		for (int d = 0; d < 7; d++) {
 			days.add(zones[i].schedule.days[d]);
 		}
@@ -73,36 +74,33 @@ void saveSchedule() {
 		obj["stopHour"] = zones[i].schedule.stopHour;
 		obj["stopMin"] = zones[i].schedule.stopMin;
 	}
+
 	File f = LittleFS.open("/save.json", "w");
-	serializeJson(doc, f);
-	f.close();
+	serializeJson(doc, f); f.close();
 }
 
 void loadSchedule() {
     if (!LittleFS.exists("/save.json")) {
-        Serial.println("No save.json found, using defaults");
+        Serial.println("No save.json found - using empty defaults");
         return;
     }
-    File f = LittleFS.open("/save.json", "r");
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, f);
-    f.close();
-
+    JsonDocument doc; File f = LittleFS.open("/save.json", "r");
+    DeserializationError err = deserializeJson(doc, f); f.close();
     if (err) {
         Serial.println("Failed to parse save.json");
+        Warn.mode = FLASH;
         return;
     }
 
-	for (i = 0; i < 3; i++) { // load each zone
-		zones[i].schedule.startHour = doc["zones"][i]["startHour"];
-		zones[i].schedule.startMin = doc["zones"][i]["startMin"];
-		zones[i].schedule.startHour = doc["zones"][i]["startHour"];
-		zones[i].schedule.startMin = doc["zones"][i]["startMin"];
-		for (d = 0; d < 7; d++ ) { // load each day
-
+	for (int i = 0; i < 3; i++) {
+		for (int d = 0; d < 7; d++ ) {
+            zones[i].schedule.days[d] = doc["zones"][i]["days"][d];
 		}
+		zones[i].schedule.startHour = doc["zones"][i]["startHour"];
+		zones[i].schedule.startMin = doc["zones"][i]["startMin"];
+		zones[i].schedule.stopHour = doc["zones"][i]["stopHour"];
+		zones[i].schedule.stopMin = doc["zones"][i]["stopMin"];
 	}
-
 }
 
 struct Zone {
@@ -164,7 +162,6 @@ void setup() {
 
 	Warn.mode = FLASH;
 	WiFi.begin(WIFI_SSID, WIFI_PSKY);
-
 	Serial.print("Connecting to network");
 	while (WiFi.status() != WL_CONNECTED) {
 		unsigned long now = millis();
@@ -174,8 +171,8 @@ void setup() {
 			timer = now;
 		}
 	}
+    Warn.mode = OFF;
 	Serial.println(" connected.");
-
 	if (MDNS.begin("watering")) {
 		Serial.println("mDNS started: http://watering.local");
 	}
@@ -201,13 +198,9 @@ void setup() {
 		Serial.println("LittleFS mount failed");
 		Warn.mode = FLASH;
 		return;
-	}
+	
 	Serial.println("LittleFS mounted");
-
-	// garbage endpoint; quiets favicon 404 error
-	server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request) {
-		request->send(204);
-	});
+    loadSchedule();
 
 	// static serving
 	server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
