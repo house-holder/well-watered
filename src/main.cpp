@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
+#include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 
 enum LEDMode { ON, OFF, FLASH };
@@ -40,24 +41,57 @@ void updateLED(StatLED &LED) {
 	}
 }
 
+// system-wide LEDs
 StatLED Ok =	 { 13, 100, 4900, OFF, 0 };
 StatLED Warn =	 { 14, 250, 1750, OFF, 0 };
-StatLED Shed =	 { 16, 200,  800, OFF, 0 };
-StatLED House =  { 17, 200,  800, OFF, 0 };
-StatLED Garden = { 18, 200,  800, OFF, 0 };
 
 struct Zone {
-	const char* name;
 	int pin;
 	bool running;
+	const char* name;
+	time_t startTime;
 	StatLED indication;
 };
 
 Zone zones[3] = {
-	{ "Garden faucet", 33, false, Garden },
-	{ "House faucet",  34, false, House },
-	{ "Shed faucet",   35, false, Shed },
+	{ 21, false, "Garden faucet", 0, { 16, 200, 800, OFF, 0 } },
+	{ 22, false, "House faucet",  0, { 17, 200, 800, OFF, 0 } },
+	{ 23, false, "Shed faucet",   0, { 18, 200, 800, OFF, 0 } },
 };
+
+// Zone zones[3] = {
+//     { .pin=33, .running=false, .name="Garden faucet", .startTime=0,
+//       .indication={ .pin=18, .onTime=200, .cycleTime=800, .mode=OFF, .start=0 } },
+//     { .pin=34, .running=false, .name="House faucet",  .startTime=0,
+//       .indication={ .pin=17, .onTime=200, .cycleTime=800, .mode=OFF, .start=0 } },
+//     { .pin=35, .running=false, .name="Shed faucet",   .startTime=0,
+//       .indication={ .pin=16, .onTime=200, .cycleTime=800, .mode=OFF, .start=0 } },
+// };
+
+String getStateJSON() {
+    JsonDocument doc;
+    JsonArray zonesArr = doc["zones"].to<JsonArray>();
+
+    for (int i = 0; i < 3; i++) {
+        Zone& z = zones[i];
+        JsonObject obj = zonesArr.add<JsonObject>();
+        obj["id"] = i;
+        obj["name"] = z.name;
+        obj["running"] = z.running;
+        if (z.running && z.startTime > 0) {
+            char buf[6];
+            struct tm* t = localtime(&z.startTime);
+            strftime(buf, sizeof(buf), "%H:%M", t);
+            obj["since"] = buf;
+        } else {
+            obj["since"] = nullptr;
+        }
+    }
+
+    String output;
+    serializeJson(doc, output);
+    return output;
+}
 
 AsyncWebServer server(80);
 
@@ -68,9 +102,10 @@ void setup() {
 
 	pinMode(Ok.pin, OUTPUT);
 	pinMode(Warn.pin, OUTPUT);
-	pinMode(Shed.pin, OUTPUT);
-	pinMode(House.pin, OUTPUT);
-	pinMode(Garden.pin, OUTPUT);
+	for (int i = 0; i < 3; i++) {
+		pinMode(zones[i].pin, OUTPUT);
+		pinMode(zones[i].indication.pin, OUTPUT);
+	}
 
 	Warn.mode = FLASH;
 	WiFi.begin(WIFI_SSID, WIFI_PSKY);
@@ -114,6 +149,12 @@ void setup() {
 	}
 	Serial.println("LittleFS mounted");
 
+	// garbage endpoint; quiets favicon 404 error
+	server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request) {
+		request->send(204);
+	});
+
+	// static serving
 	server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
 		request->send(LittleFS, "/index.html", "text/html");
 	});
@@ -122,6 +163,38 @@ void setup() {
 	});
 	server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
 		request->send(LittleFS, "/style.css", "text/css");
+	});
+
+	// basic state
+	server.on("/api/state", HTTP_GET, [](AsyncWebServerRequest *request) {
+		request->send(200, "application/json", getStateJSON());
+	});
+
+	// valve toggle endpoints
+	server.on("^\\/api\\/zones\\/(\\d+)\\/enable$",
+	HTTP_POST,
+	[](AsyncWebServerRequest *request) {
+		int id = request->pathArg(0).toInt();
+		if (id < 0 || id > 2) {
+			request->send(400, "application/json", "{\"error\":\"invalid zone\"}");
+			return;
+		}
+		zones[id].running = true;
+		time(&zones[id].startTime);
+		request->send(200, "application/json", "{\"ok\":true}");
+	});
+
+	server.on("^\\/api\\/zones\\/(\\d+)\\/disable$",
+	HTTP_POST,
+	[](AsyncWebServerRequest *request) {
+		int id = request->pathArg(0).toInt();
+		if (id < 0 || id > 2) {
+			request->send(400, "application/json", "{\"error\":\"invalid zone\"}");
+			return;
+		}
+		zones[id].running = false;
+		zones[id].startTime = 0;
+		request->send(200, "application/json", "{\"ok\":true}");
 	});
 
 	server.begin();
@@ -134,9 +207,12 @@ void setup() {
 void updateAllLEDs() {
 	updateLED(Ok);
 	updateLED(Warn);
-	updateLED(Shed);
-	updateLED(House);
-	updateLED(Garden);
+
+	for (int i = 0; i < 3; i++) {
+		zones[i].indication.mode = zones[i].running ? ON : OFF;
+		digitalWrite(zones[i].pin, zones[i].running ? HIGH : LOW);
+		updateLED(zones[i].indication);
+	}
 }
 
 // Loop -----------------------------------------------------------------------
