@@ -160,8 +160,18 @@ void setup() {
 		pinMode(zones[i].indication.pin, OUTPUT);
 	}
 
+    // TODO: dynamic wifi credential setting
+    // if (wifi.network0.exists) { use that network's creds etc. }
+    // future, conditionally set from loaded .env:
+    // const *char network = CGINET;
+    // const *char passkey = CGIKEY;
+
+    const *char network = HOMENET;
+    const *char passkey = HOMEKEY;
+
 	Warn.mode = FLASH;
-	WiFi.begin(WIFI_SSID, WIFI_PSKY);
+	WiFi.begin(network, passkey);
+
 	Serial.print("Connecting to network");
 	while (WiFi.status() != WL_CONNECTED) {
 		unsigned long now = millis();

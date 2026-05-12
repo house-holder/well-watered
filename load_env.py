@@ -9,6 +9,8 @@ with open(".env") as f:
             os.environ[key] = value
 
 env.Append(CPPDEFINES=[
-    ("WIFI_SSID", '\\"%s\\"' % os.environ["WELLWATEREDNTWK"]),
-    ("WIFI_PSKY", '\\"%s\\"' % os.environ["WELLWATEREDKEY"]),
+    ("HOUSENET", '\\"%s\\"' % os.environ["HOUSENTW"]),
+    ("HOUSEKEY", '\\"%s\\"' % os.environ["HOUSEKEY"]),
+    # ("CGINET", '\\"%s\\"' % os.environ["CGINTW"]),
+    # ("CGIKEY", '\\"%s\\"' % os.environ["CGIKEY"]),
 ])
