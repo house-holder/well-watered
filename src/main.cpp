@@ -42,8 +42,8 @@ void updateLED(StatLED &LED) {
 }
 
 // system-wide LEDs
-StatLED Ok =	 { 13, 100, 4900, OFF, 0 };
-StatLED Warn =	 { 14, 250, 1750, OFF, 0 };
+StatLED Warn =	 { 13, 100,  750, OFF, 0 };
+StatLED Ok =	 { 14, 250, 1750, OFF, 0 };
 
 struct Schedule {
 	bool days[7];
@@ -265,10 +265,10 @@ void setup() {
 	});
 
 	server.begin();
-	Warn.mode = OFF;
-	Ok.mode = ON;
-
 	Serial.printf("Webserver running (%s)\n", WiFi.localIP().toString()); 
+
+	Ok.mode = ON;
+	Warn.mode = OFF;
 }
 
 void updateAllLEDs() {

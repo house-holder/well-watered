@@ -6,7 +6,7 @@ const zoneState = [ // countdown grace period to enable
 
 const graceCountdown = 5;
 
-// setup functions ------------------------------------------------------------
+// setup functions -----------------------------------------------------------------------
 function updateClock() {
     const now = new Date();
     const raw = now.getHours();
@@ -46,7 +46,7 @@ function formatTime(timeStr) {
 	return `${hours}:${minutes} ${suffix}`
 }
 
-// active functions -----------------------------------------------------------
+// active functions ----------------------------------------------------------------------
 async function fetchState() {
 	const resp = await fetch('/api/state');
 	const data = await resp.json();
@@ -87,25 +87,35 @@ async function init() {
         btn.addEventListener('click', async () => {
             const zoneId = parseInt(btn.dataset.zone);
 			const state = zoneState[zoneId];
+			const testingEnabled = true;
 			
 			if (state.mode === 'idle') {
-				state.mode = 'grace';
-				state.remaining = graceCountdown;
-				btn.textContent = `${state.remaining}s... Cancel`;
+				if (!testingEnabled) {
+					state.mode = 'grace';
+					state.remaining = graceCountdown;
+					btn.textContent = `${state.remaining}s... Cancel`;
 
-				state.timer = setInterval(async () => {
-					state.remaining--;
-					if (state.remaining > 0) {
-						btn.textContent = `${state.remaining}s... Cancel`;
-					} else {
-						clearInterval(state.timer);
-						await fetch(`/api/zones/${zoneId}/enable`, { method: 'POST' });
-						const data = await fetchState();
-						applyState(data);
-						state.mode = 'active';
-						btn.textContent = 'Disable';
-					}
-				}, 1000);
+					state.timer = setInterval(async () => {
+						state.remaining--;
+						if (state.remaining > 0) {
+							btn.textContent = `${state.remaining}s... Cancel`;
+						} else {
+							clearInterval(state.timer);
+							await fetch(`/api/zones/${zoneId}/enable`, { method: 'POST' });
+							const data = await fetchState();
+							applyState(data);
+							state.mode = 'active';
+							btn.textContent = 'Disable';
+						}
+					}, 1000);
+				} else {
+					clearInterval(state.timer);
+					await fetch(`/api/zones/${zoneId}/enable`, { method: 'POST' });
+					const data = await fetchState();
+					applyState(data);
+					state.mode = 'active';
+					btn.textContent = 'Disable';
+				}
 			} else if (state.mode === 'grace') {
 				clearInterval(state.timer);
 				btn.textContent = 'Enable';
@@ -128,6 +138,9 @@ async function fetchSchedule() {
 
 function applySchedule(data) {
 	// find card by 'data-zone'
+	// for (let i = 0; i < 3; i++) {
+	//
+	// }
 	// set correct day buttons to 'active' class
 	// set start/stop time pickers to stored values
 }
