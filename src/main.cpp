@@ -20,6 +20,38 @@ struct StatLED {
 	int cycleTime;
 	LEDMode mode;
 	unsigned long start;
+
+	void on() { mode = ON; }
+	void off() { mode = OFF; }
+	void flash() { mode = FLASH; start = millis(); }
+
+	void update(int newOnTime, int newCycleTime) {
+		onTime = newOnTime;
+		cycleTime = newCycleTime;
+	}
+
+	void tick() {
+		unsigned long now = millis();
+		int status = digitalRead(pin);
+		switch (mode) {
+			case ON:
+				if (status == LOW) digitalWrite(pin, HIGH);
+				break;
+			case OFF:
+				if (status == HIGH) digitalWrite(pin, LOW);
+				break;
+			case FLASH: {
+				unsigned long runtime = now - start;
+				if (runtime >= cycleTime && status == LOW) {
+					digitalWrite(pin, HIGH);
+					start = now;
+				} else if (runtime >= onTime && status == HIGH) {
+					digitalWrite(pin, LOW);
+				}
+				break;
+			}
+		}
+	}
 };
 
 struct Schedule {
@@ -36,75 +68,64 @@ struct Zone {
 	const char* name;
 	time_t startTime;
 	Schedule schedule;
-	StatLED indication;
+	StatLED LED;
 };
-
-void updateLED(StatLED &LED) {
-	unsigned long now = millis();
-	int status = digitalRead(LED.pin);
-	switch (LED.mode) {
-		case ON:
-			if (status == LOW) digitalWrite(LED.pin, HIGH);
-			break;
-		case OFF:
-			if (status == HIGH) digitalWrite(LED.pin, LOW);
-			break;
-		case FLASH: {
-			unsigned long runtime = now - LED.start;
-			if (runtime >= LED.cycleTime && status == LOW) {
-				digitalWrite(LED.pin, HIGH);
-				LED.start = now;					
-			} else {
-				if (runtime >= LED.onTime && status == HIGH) {
-					digitalWrite(LED.pin, LOW);
-				}
-			}
-			break;
-		}
-	}
-}
 
 const Schedule DEFAULT_SCHEDULE = {
-    .days  = { false, false, false, false, false, false, false },
-    .startHour = 6, .startMin = 0, .stopHour  = 7, .stopMin  = 15
+	.days  = { false, false, false, false, false, false, false },
+	.startHour = 6, .startMin = 0, .stopHour  = 7, .stopMin  = 15
 };
 
-StatLED Warn =	 { 13,  100,  400, OFF, 0 };
-StatLED Ok =	 { 14, 1000, 4000, OFF, 0 };
+StatLED Ok = { 14, 1000, 4000, OFF, 0 };
+StatLED Warn = { 13, 100, 400, FLASH, 0 };
 
 Zone zones[3] = {
 	{ .pin=21, .name="Garden faucet", .schedule=DEFAULT_SCHEDULE,
-		.indication={ .pin=16, .onTime=200, .cycleTime=800 }, },
+		.LED={ .pin=16, .onTime=200, .cycleTime=800 }, },
 	{ .pin=22, .name="House faucet",  .schedule=DEFAULT_SCHEDULE,
-		.indication={ .pin=17, .onTime=200, .cycleTime=800 }, },
+		.LED={ .pin=17, .onTime=200, .cycleTime=800 }, },
 	{ .pin=23, .name="Shed faucet",   .schedule=DEFAULT_SCHEDULE,
-		.indication={ .pin=18, .onTime=200, .cycleTime=800 }, },
+		.LED={ .pin=18, .onTime=200, .cycleTime=800 }, },
 };
+
+// FreeRTOS Tasks -------------------------------------------------------------
+void ledTask(void*) {
+	while (true) {
+		Ok.tick();
+		Warn.tick();
+		for (int i = 0; i < 3; i++) {
+			// could do a check for problems and flash light if any exist?
+			zones[i].LED.mode = zones[i].running ? ON : OFF;
+			zones[i].LED.tick();
+		}
+		vTaskDelay(50 / portTICK_PERIOD_MS);
+	}
+}
 
 // Accessory functions --------------------------------------------------------
 String getStateJSON() {
-    JsonDocument doc;
-    JsonArray zonesArr = doc["zones"].to<JsonArray>();
+	JsonDocument doc;
+	JsonArray zonesArr = doc["zones"].to<JsonArray>();
 
-    for (int i = 0; i < 3; i++) {
-        Zone& z = zones[i];
-        JsonObject obj = zonesArr.add<JsonObject>();
-        obj["id"] = i;
-        obj["name"] = z.name;
-        obj["running"] = z.running;
-        if (z.running && z.startTime > 0) {
-            char buf[6];
-            struct tm* t = localtime(&z.startTime);
-            strftime(buf, sizeof(buf), "%H:%M", t);
-            obj["since"] = buf;
-        } else {
-            obj["since"] = nullptr;
-        }
-    }
+	for (int i = 0; i < 3; i++) {
+		Zone& z = zones[i];
+		JsonObject obj = zonesArr.add<JsonObject>();
+		obj["id"] = i;
+		obj["name"] = z.name;
+		obj["running"] = z.running;
+		if (z.running && z.startTime > 0) {
+			char buf[6];
+			struct tm* t = localtime(&z.startTime);
+			strftime(buf, sizeof(buf), "%H:%M", t);
+			obj["since"] = buf;
+		} else {
+			obj["since"] = nullptr;
+		}
+	}
 
-    String output;
-    serializeJson(doc, output);
-    return output;
+	String output;
+	serializeJson(doc, output);
+	return output;
 }
 
 void saveSchedule() {
@@ -131,21 +152,20 @@ void saveSchedule() {
 }
 
 void loadSchedule() {
-    if (!LittleFS.exists("/save.json")) {
-        Serial.println("No save.json found - using empty defaults");
-        return;
-    }
-    JsonDocument doc; File f = LittleFS.open("/save.json", "r");
-    DeserializationError err = deserializeJson(doc, f); f.close();
-    if (err) {
-        Serial.println("Failed to parse save.json");
-        Warn.mode = FLASH;
-        return;
-    }
+	if (!LittleFS.exists("/save.json")) {
+		Serial.println("No save.json found - using empty defaults");
+		return;
+	}
+	JsonDocument doc; File f = LittleFS.open("/save.json", "r");
+	DeserializationError err = deserializeJson(doc, f); f.close();
+	if (err) {
+		Serial.println("Failed to parse save.json");
+		return;
+	}
 
 	for (int i = 0; i < 3; i++) {
 		for (int d = 0; d < 7; d++ ) {
-            zones[i].schedule.days[d] = doc["zones"][i]["days"][d];
+			zones[i].schedule.days[d] = doc["zones"][i]["days"][d];
 		}
 		zones[i].schedule.startHour = doc["zones"][i]["startHour"];
 		zones[i].schedule.startMin = doc["zones"][i]["startMin"];
@@ -153,15 +173,14 @@ void loadSchedule() {
 		zones[i].schedule.stopMin = doc["zones"][i]["stopMin"];
 	}
 }
-void updater() {
-	updateLED(Ok);
-	updateLED(Warn);
 
-	for (int i = 0; i < 3; i++) {
-		zones[i].indication.mode = zones[i].running ? ON : OFF;
-		digitalWrite(zones[i].pin, zones[i].running ? HIGH : LOW);
-		updateLED(zones[i].indication);
-	}
+const char* logTime() {
+	static char buf[16];
+	struct tm t;
+	getLocalTime(&t);
+	// 13May 10:10:10
+	strftime(buf, sizeof(buf), "%d%b %H:%M:%S ", &t);
+	return buf;
 }
 
 void commandListener() {
@@ -182,40 +201,39 @@ void initPins() {
 	pinMode(Warn.pin, OUTPUT);
 	for (int i = 0; i < 3; i++) {
 		pinMode(zones[i].pin, OUTPUT);
-		pinMode(zones[i].indication.pin, OUTPUT);
+		pinMode(zones[i].LED.pin, OUTPUT);
+		zones[i].LED.off();
 	}
-	Warn.mode = FLASH; // set flash only after pin setup
 }
 
 void initWifi() {
-    const char *ntw = HOUSENET;
-    const char *psk = HOUSEKEY;
-    // const char *ntw = CGINET;
-    // const char *psk = CGIKEY;
+	const char *ntw = HOUSENET;
+	const char *psk = HOUSEKEY;
+	// const char *ntw = CGINET;
+	// const char *psk = CGIKEY;
 
 	WiFi.begin(ntw, psk);
-	Serial.print("Connecting to network");
+	Serial.printf("%s Connecting to network");
 
 	unsigned long timer = 0;
 	while (WiFi.status() != WL_CONNECTED) {
 		unsigned long now = millis();
-		updateLED(Warn);
 		if (now - timer >= 500) {
 			Serial.print(".");
 			timer = now;
 		}
 	}
-	Serial.println(" connected.");	
+	Serial.printf("\n%s Connection successful\n", logTime());	
 }
 
 void initMDNS() {
 	if (MDNS.begin("watering")) {
-		Serial.println("mDNS started: http://watering.local");
+		Serial.printf("%s mDNS started: http://watering.local\n", logTime());
 	}
 }
 
 void initNTP(tm &timeinfo) {
-	Serial.print("Syncing time...");
+	Serial.printf("%s Syncing with timeserver", logTime());
 	unsigned long timer = 0;
 	const long GMT_OFFSET = -6 * 3600;
 	const int DST_OFFSET  = 3600;
@@ -223,7 +241,6 @@ void initNTP(tm &timeinfo) {
 	configTime(GMT_OFFSET, DST_OFFSET, "pool.ntp.org");
 
 	while (!getLocalTime(&timeinfo)) {
-		updateLED(Warn);
 		unsigned long now = millis();
 		if (now - timer >= 100) {
 			Serial.print(".");
@@ -236,14 +253,13 @@ void initNTP(tm &timeinfo) {
 
 void initLittleFS() {
 	if (!LittleFS.begin()) {
-		Serial.println("LittleFS mount failed");
-		Warn.mode = FLASH;
+		Serial.printf("%s LittleFS mount failed\n", logTime());
 		return;
 	}	
-	Serial.println("LittleFS mounted");
+	Serial.printf("%s LittleFS mounted\n", logTime());
 	if (!LittleFS.exists("/save.json")) {
 		saveSchedule();
-		Serial.println("save.json initialized with defaults");
+		Serial.printf("%s save.json initialized with defaults\n", logTime());
 	}
     loadSchedule();
 }
@@ -279,29 +295,25 @@ void initAPIRouting() {
 	server.on(ZONE_ENABLE, HTTP_POST, [](Req *r) {
 		int id = r->pathArg(0).toInt();
 		if (id < 0 || id > 2) {
-			r->send(
-					400,
-					"application/json",
-					"{\"error\":\"invalid zone\"}");
+			r->send(400, "application/json", "{\"error\":\"invalid zone\"}");
 			return;
 		}
 		zones[id].running = true;
 		time(&zones[id].startTime);
 		r->send(200, "application/json", "{\"ok\":true}");
+		Serial.printf("%s %s ON\n", logTime(), zones[id].name);
 	});
 
 	server.on(ZONE_DISABLE, HTTP_POST, [](Req *r) {
 		int id = r->pathArg(0).toInt();
 		if (id < 0 || id > 2) {
-			r->send(
-					400,
-					"application/json",
-					"{\"error\":\"invalid zone\"}");
+			r->send(400, "application/json", "{\"error\":\"invalid zone\"}");
 			return;
 		}
 		zones[id].running = false;
 		zones[id].startTime = 0;
 		r->send(200, "application/json", "{\"ok\":true}");
+		Serial.printf("%s %s OFF\n", logTime(), zones[id].name);
 	});
 
 	server.on("/api/schedule/save", HTTP_POST, [](Req *r) {
@@ -317,6 +329,8 @@ void setup() {
 	struct tm timeinfo;
 
 	initPins();
+	xTaskCreate(ledTask, "LEDs", 2048, nullptr, 1, nullptr);
+
 	initWifi();
 	initMDNS();
 	initNTP(timeinfo);
@@ -326,11 +340,10 @@ void setup() {
 	server.begin();
 	Serial.printf("Webserver running (%s)\n", WiFi.localIP().toString()); 
 
-	Ok.mode = ON;
-	Warn.mode = OFF;
+	Ok.on();
+	Warn.off();
 }
 
 void loop() {
-	updater();
 	commandListener();
 }
