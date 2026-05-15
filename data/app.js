@@ -4,7 +4,7 @@ const zoneState = [ // countdown grace period to enable
 	{ mode: 'idle', timer: null, remaining: 0 },
 ];
 
-const graceCountdown = 5;
+const graceCountdown = 10;
 
 // setup functions -----------------------------------------------------------------------
 function updateClock() {
@@ -87,7 +87,7 @@ async function init() {
         btn.addEventListener('click', async () => {
             const zoneId = parseInt(btn.dataset.zone);
 			const state = zoneState[zoneId];
-			const testingEnabled = true;
+			const testingEnabled = false;
 			
 			if (state.mode === 'idle') {
 				if (!testingEnabled) {

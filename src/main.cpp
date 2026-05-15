@@ -4,8 +4,11 @@
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
+#include <WiFiMulti.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
+
+WiFiMulti wifiMulti;
 
 AsyncWebServer server(80);
 using Req = AsyncWebServerRequest;
@@ -216,9 +219,6 @@ void cmdRSC() {
 	Serial.printf("  Uptime:   %luh %lum %lus\n", 
 		upHr, upMin % 60, upSec % 60);
 
-	// WiFi signal strength
-	Serial.printf("  WiFi RSSI: %d dBm\n", WiFi.RSSI());
-
 	// LittleFS usage
 	float fsUsed  = LittleFS.usedBytes()  / 1024.0f;
 	float fsTotal = LittleFS.totalBytes() / 1024.0f;
@@ -248,23 +248,21 @@ void initPins() {
 }
 
 void initWifi() {
-	const char *ntw = HOUSENET;
-	const char *psk = HOUSEKEY;
-	// const char *ntw = CGINET;
-	// const char *psk = CGIKEY;
+    wifiMulti.addAP(HOUSENET, HOUSEKEY);
+    wifiMulti.addAP(CGINET, CGIKEY);
 
-	WiFi.begin(ntw, psk);
 	Serial.printf("Connecting to network...");
 
 	unsigned long timer = 0;
-	while (WiFi.status() != WL_CONNECTED) {
+	while (wifiMulti.run() != WL_CONNECTED) {
 		unsigned long now = millis();
 		if (now - timer >= 500) {
 			Serial.print(".");
 			timer = now;
 		}
 	}
-	Serial.printf(" success\n");	
+	Serial.printf(" success, connected to %s\n", WiFi.SSID().c_str());
+	Serial.printf("RSSI: %d dBm\n", WiFi.RSSI());
 }
 
 void initNTP(tm &timeinfo) {
