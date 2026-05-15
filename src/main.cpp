@@ -1,5 +1,6 @@
 #include <WiFi.h>
 #include <time.h>
+#include <stdarg.h>
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
@@ -174,13 +175,55 @@ void loadSchedule() {
 	}
 }
 
-const char* logTime() {
+const char* timestamp() {
 	static char buf[16];
 	struct tm t;
 	getLocalTime(&t);
-	// 13May 10:10:10
-	strftime(buf, sizeof(buf), "%d%b %H:%M:%S ", &t);
+	strftime(buf, sizeof(buf), "%m-%d %H:%M:%S", &t);
 	return buf;
+}
+
+void logf(const char* fmt, ...) {
+	char buf[128];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
+	Serial.printf("%s %s\n", timestamp(), buf);
+}
+
+// Serial commands ------------------------------------------------------------
+
+void cmdRSC() {
+    float total    = ESP.getHeapSize()     / 1024.0f;
+    float freeHeap = ESP.getFreeHeap()     / 1024.0f;
+    float minFree  = ESP.getMinFreeHeap()  / 1024.0f;
+    float maxBlk   = ESP.getMaxAllocHeap() / 1024.0f;
+    float used     = total - freeHeap;
+    float peak     = total - minFree;
+
+    logf("[RESOURCE MONITOR]");
+    Serial.printf("  Heap:     %.1f / %.1f KiB (%.1f%%)\n",
+			used, total, (used/total)*100);
+    Serial.printf("  Peak:     %.1f KiB used\n", peak);
+    Serial.printf("  Headroom: %.1f KiB free, largest block %.1f KiB\n",
+			freeHeap, maxBlk);
+
+	// uptime
+	unsigned long upSec = millis() / 1000;
+	unsigned long upMin = upSec / 60;
+	unsigned long upHr  = upMin / 60;
+	Serial.printf("  Uptime:   %luh %lum %lus\n", 
+		upHr, upMin % 60, upSec % 60);
+
+	// WiFi signal strength
+	Serial.printf("  WiFi RSSI: %d dBm\n", WiFi.RSSI());
+
+	// LittleFS usage
+	float fsUsed  = LittleFS.usedBytes()  / 1024.0f;
+	float fsTotal = LittleFS.totalBytes() / 1024.0f;
+	Serial.printf("  FS used:  %.2f / %.2f KiB (%.1f%%)\n",
+		fsUsed, fsTotal, (fsUsed / fsTotal) * 100);
 }
 
 void commandListener() {
@@ -188,9 +231,7 @@ void commandListener() {
 		String cmd = Serial.readStringUntil('\n');
 		cmd.trim();
 		if (cmd == "rsc") {
-			Serial.println("[ Resource monitor ]");
-			Serial.printf("  Heap size: %d\n", ESP.getHeapSize());
-			Serial.printf("  Min heap:  %d\n", ESP.getMinFreeHeap());
+			cmdRSC();
 		}
 	}
 }
@@ -213,7 +254,7 @@ void initWifi() {
 	// const char *psk = CGIKEY;
 
 	WiFi.begin(ntw, psk);
-	Serial.printf("%s Connecting to network");
+	Serial.printf("Connecting to network...");
 
 	unsigned long timer = 0;
 	while (WiFi.status() != WL_CONNECTED) {
@@ -223,17 +264,11 @@ void initWifi() {
 			timer = now;
 		}
 	}
-	Serial.printf("\n%s Connection successful\n", logTime());	
-}
-
-void initMDNS() {
-	if (MDNS.begin("watering")) {
-		Serial.printf("%s mDNS started: http://watering.local\n", logTime());
-	}
+	Serial.printf(" success\n");	
 }
 
 void initNTP(tm &timeinfo) {
-	Serial.printf("%s Syncing with timeserver", logTime());
+	Serial.printf("Syncing with timeserver...");
 	unsigned long timer = 0;
 	const long GMT_OFFSET = -6 * 3600;
 	const int DST_OFFSET  = 3600;
@@ -251,15 +286,21 @@ void initNTP(tm &timeinfo) {
 	Serial.println(&timeinfo, " synced, time now: %H:%M:%S");
 }
 
+void initMDNS() {
+	if (MDNS.begin("watering")) {
+		logf("mDNS started: http://watering.local");
+	}
+}
+
 void initLittleFS() {
 	if (!LittleFS.begin()) {
-		Serial.printf("%s LittleFS mount failed\n", logTime());
+		logf("LittleFS mount failed");
 		return;
 	}	
-	Serial.printf("%s LittleFS mounted\n", logTime());
+	logf("LittleFS mounted");
 	if (!LittleFS.exists("/save.json")) {
 		saveSchedule();
-		Serial.printf("%s save.json initialized with defaults\n", logTime());
+		logf("/save.json initialized with defaults");
 	}
     loadSchedule();
 }
@@ -301,7 +342,7 @@ void initAPIRouting() {
 		zones[id].running = true;
 		time(&zones[id].startTime);
 		r->send(200, "application/json", "{\"ok\":true}");
-		Serial.printf("%s %s ON\n", logTime(), zones[id].name);
+		logf("%s ON", zones[id].name);
 	});
 
 	server.on(ZONE_DISABLE, HTTP_POST, [](Req *r) {
@@ -313,7 +354,7 @@ void initAPIRouting() {
 		zones[id].running = false;
 		zones[id].startTime = 0;
 		r->send(200, "application/json", "{\"ok\":true}");
-		Serial.printf("%s %s OFF\n", logTime(), zones[id].name);
+		logf("%s OFF", zones[id].name);
 	});
 
 	server.on("/api/schedule/save", HTTP_POST, [](Req *r) {
@@ -332,16 +373,19 @@ void setup() {
 	xTaskCreate(ledTask, "LEDs", 2048, nullptr, 1, nullptr);
 
 	initWifi();
-	initMDNS();
 	initNTP(timeinfo);
+	initMDNS();
 	initLittleFS();
 	initAPIRouting();
-
 	server.begin();
-	Serial.printf("Webserver running (%s)\n", WiFi.localIP().toString()); 
+
+	float startup = static_cast<float>(millis()) / 1000;
+	logf("Webserver running on %s", WiFi.localIP().toString().c_str());
+	logf("Boot sequence took %.1f seconds", startup, millis());
 
 	Ok.on();
 	Warn.off();
+	cmdRSC();
 }
 
 void loop() {
