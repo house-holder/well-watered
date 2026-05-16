@@ -238,13 +238,14 @@ void commandListener() {
 
 // Setup Functions ------------------------------------------------------------
 void initPins() {
-	pinMode(Ok.pin, OUTPUT);
-	pinMode(Warn.pin, OUTPUT);
 	for (int i = 0; i < 3; i++) {
+		digitalWrite(zones[i].pin, LOW);
 		pinMode(zones[i].pin, OUTPUT);
 		pinMode(zones[i].LED.pin, OUTPUT);
 		zones[i].LED.off();
 	}
+	pinMode(Ok.pin, OUTPUT);
+	pinMode(Warn.pin, OUTPUT);
 }
 
 void initWifi() {
@@ -365,9 +366,9 @@ void initAPIRouting() {
 // Main: setup & loop ---------------------------------------------------------
 void setup() {
 	Serial.begin(115200);
-	struct tm timeinfo;
-
 	initPins();
+
+	struct tm timeinfo;
 	xTaskCreate(ledTask, "LEDs", 2048, nullptr, 1, nullptr);
 
 	initWifi();
