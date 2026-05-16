@@ -13,4 +13,6 @@ env.Append(CPPDEFINES=[
     ("HOUSEKEY", '\\"%s\\"' % os.environ["HKY"]),
     ("CGINET", '\\"%s\\"' % os.environ["CNW"]),
     ("CGIKEY", '\\"%s\\"' % os.environ["CKY"]),
+    ("PNET", '\\"%s\\"' % os.environ["PNW"]),
+    ("PKEY", '\\"%s\\"' % os.environ["PKY"]),
 ])

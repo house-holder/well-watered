@@ -1,3 +1,4 @@
+#include "esp32-hal-gpio.h"
 #include <WiFi.h>
 #include <time.h>
 #include <stdarg.h>
@@ -5,6 +6,7 @@
 #include <ESPmDNS.h>
 #include <LittleFS.h>
 #include <WiFiMulti.h>
+#include <driver/gpio.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 
@@ -15,6 +17,12 @@ using Req = AsyncWebServerRequest;
 
 const char* ZONE_ENABLE  = "^\\/api\\/zones\\/(\\d+)\\/enable$";
 const char* ZONE_DISABLE = "^\\/api\\/zones\\/(\\d+)\\/disable$";
+
+const int DC_OK = 4;
+
+bool pwrOk24V() {
+	return digitalRead(DC_OK) == LOW;
+}
 
 enum LEDMode { ON, OFF, FLASH };
 
@@ -84,27 +92,14 @@ StatLED Ok = { 14, 1000, 4000, OFF, 0 };
 StatLED Warn = { 13, 100, 400, FLASH, 0 };
 
 Zone zones[3] = {
-	{ .pin=21, .name="Garden faucet", .schedule=DEFAULT_SCHEDULE,
-		.LED={ .pin=16, .onTime=200, .cycleTime=800 }, },
-	{ .pin=22, .name="House faucet",  .schedule=DEFAULT_SCHEDULE,
-		.LED={ .pin=17, .onTime=200, .cycleTime=800 }, },
-	{ .pin=23, .name="Shed faucet",   .schedule=DEFAULT_SCHEDULE,
-		.LED={ .pin=18, .onTime=200, .cycleTime=800 }, },
+	{ .pin=16, .name="Garden faucet", .schedule=DEFAULT_SCHEDULE,
+		.LED={ .pin=25, .onTime=200, .cycleTime=800 }, },
+	{ .pin=17, .name="House faucet",  .schedule=DEFAULT_SCHEDULE,
+		.LED={ .pin=26, .onTime=200, .cycleTime=800 }, },
+	{ .pin=18, .name="Shed faucet",   .schedule=DEFAULT_SCHEDULE,
+		.LED={ .pin=27, .onTime=200, .cycleTime=800 }, },
 };
 
-// FreeRTOS Tasks -------------------------------------------------------------
-void ledTask(void*) {
-	while (true) {
-		Ok.tick();
-		Warn.tick();
-		for (int i = 0; i < 3; i++) {
-			// could do a check for problems and flash light if any exist?
-			zones[i].LED.mode = zones[i].running ? ON : OFF;
-			zones[i].LED.tick();
-		}
-		vTaskDelay(50 / portTICK_PERIOD_MS);
-	}
-}
 
 // Accessory functions --------------------------------------------------------
 String getStateJSON() {
@@ -186,7 +181,7 @@ const char* timestamp() {
 	return buf;
 }
 
-void logf(const char* fmt, ...) {
+void logger(const char* fmt, ...) {
 	char buf[128];
 	va_list args;
 	va_start(args, fmt);
@@ -195,8 +190,42 @@ void logf(const char* fmt, ...) {
 	Serial.printf("%s %s\n", timestamp(), buf);
 }
 
-// Serial commands ------------------------------------------------------------
 
+// FreeRTOS Tasks -------------------------------------------------------------
+void ledTask(void*) {
+	while (true) {
+		Ok.tick();
+		Warn.tick();
+		for (int i = 0; i < 3; i++) {
+			// could do a check for problems and flash light if any exist?
+			zones[i].LED.mode = zones[i].running ? ON : OFF;
+			zones[i].LED.tick();
+		}
+		vTaskDelay(50 / portTICK_PERIOD_MS);
+	}
+}
+
+void powerMonitorTask(void*) {
+    bool lastState = false;
+    while (true) {
+        bool currentState = pwrOk24V();
+        if (currentState != lastState) {
+            if (currentState) {
+                logger("24V supply restored");
+                Ok.on();
+                Warn.off();
+            } else {
+                logger("24V supply lost");
+                Ok.flash();
+                Warn.flash();
+            }
+            lastState = currentState;
+        }
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
+}
+
+// Serial commands ------------------------------------------------------------
 void cmdRSC() {
     float total    = ESP.getHeapSize()     / 1024.0f;
     float freeHeap = ESP.getFreeHeap()     / 1024.0f;
@@ -205,7 +234,7 @@ void cmdRSC() {
     float used     = total - freeHeap;
     float peak     = total - minFree;
 
-    logf("[RESOURCE MONITOR]");
+    logger("[RESOURCE MONITOR]");
     Serial.printf("  Heap:     %.1f / %.1f KiB (%.1f%%)\n",
 			used, total, (used/total)*100);
     Serial.printf("  Peak:     %.1f KiB used\n", peak);
@@ -236,21 +265,29 @@ void commandListener() {
 	}
 }
 
+
 // Setup Functions ------------------------------------------------------------
 void initPins() {
+	Serial.println("Pin setup");
 	for (int i = 0; i < 3; i++) {
 		digitalWrite(zones[i].pin, LOW);
 		pinMode(zones[i].pin, OUTPUT);
 		pinMode(zones[i].LED.pin, OUTPUT);
 		zones[i].LED.off();
+		Serial.printf("%s (z%d): C%d-L%d\n",
+				zones[i].name, i,
+				digitalRead(zones[i].pin),
+				digitalRead(zones[i].LED.pin));
 	}
 	pinMode(Ok.pin, OUTPUT);
 	pinMode(Warn.pin, OUTPUT);
+	pinMode(DC_OK, INPUT_PULLUP);
 }
 
 void initWifi() {
     wifiMulti.addAP(HOUSENET, HOUSEKEY);
     wifiMulti.addAP(CGINET, CGIKEY);
+	wifiMulti.addAP(PNET, PKEY);
 
 	Serial.printf("Connecting to network...");
 
@@ -287,19 +324,19 @@ void initNTP(tm &timeinfo) {
 
 void initMDNS() {
 	if (MDNS.begin("watering")) {
-		logf("mDNS started: http://watering.local");
+		logger("mDNS started: http://watering.local");
 	}
 }
 
 void initLittleFS() {
 	if (!LittleFS.begin()) {
-		logf("LittleFS mount failed");
+		logger("LittleFS mount failed");
 		return;
 	}	
-	logf("LittleFS mounted");
+	logger("LittleFS mounted");
 	if (!LittleFS.exists("/save.json")) {
 		saveSchedule();
-		logf("/save.json initialized with defaults");
+		logger("/save.json initialized with defaults");
 	}
     loadSchedule();
 }
@@ -333,6 +370,12 @@ void initAPIRouting() {
 	});
 
 	server.on(ZONE_ENABLE, HTTP_POST, [](Req *r) {
+		if (!pwrOk24V()) {
+			r->send(503, "application/json", "{\"error\":\"24V not ready\"}");
+			logger("Zone enable rejected - 24VDC supply fault");
+			return;	
+		}
+
 		int id = r->pathArg(0).toInt();
 		if (id < 0 || id > 2) {
 			r->send(400, "application/json", "{\"error\":\"invalid zone\"}");
@@ -341,7 +384,9 @@ void initAPIRouting() {
 		zones[id].running = true;
 		time(&zones[id].startTime);
 		r->send(200, "application/json", "{\"ok\":true}");
-		logf("%s ON", zones[id].name);
+		digitalWrite(zones[id].pin, HIGH);
+		// logger("%s ON", zones[id].name);
+		logger("%s ON, pin=%d", zones[id].name, digitalRead(zones[id].pin));
 	});
 
 	server.on(ZONE_DISABLE, HTTP_POST, [](Req *r) {
@@ -353,7 +398,9 @@ void initAPIRouting() {
 		zones[id].running = false;
 		zones[id].startTime = 0;
 		r->send(200, "application/json", "{\"ok\":true}");
-		logf("%s OFF", zones[id].name);
+		digitalWrite(zones[id].pin, LOW);
+		// logger("%s OFF", zones[id].name);
+		logger("%s OFF, pin=%d", zones[id].name, digitalRead(zones[id].pin));
 	});
 
 	server.on("/api/schedule/save", HTTP_POST, [](Req *r) {
@@ -363,6 +410,7 @@ void initAPIRouting() {
 	});
 }
 
+
 // Main: setup & loop ---------------------------------------------------------
 void setup() {
 	Serial.begin(115200);
@@ -370,6 +418,7 @@ void setup() {
 
 	struct tm timeinfo;
 	xTaskCreate(ledTask, "LEDs", 2048, nullptr, 1, nullptr);
+	xTaskCreate(powerMonitorTask, "PWR", 2048, nullptr, 1, nullptr);
 
 	initWifi();
 	initNTP(timeinfo);
@@ -379,11 +428,16 @@ void setup() {
 	server.begin();
 
 	float startup = static_cast<float>(millis()) / 1000;
-	logf("Webserver running on %s", WiFi.localIP().toString().c_str());
-	logf("Boot sequence took %.1f seconds", startup, millis());
+	logger("Webserver running on %s", WiFi.localIP().toString().c_str());
+	logger("Boot sequence took %.1f seconds", startup, millis());
 
-	Ok.on();
-	Warn.off();
+	if (!pwrOk24V()) {
+		logger(" WARNING: 24V supply not ready");
+		Ok.flash();
+	} else {
+		Ok.on();
+		Warn.off();
+	}
 	cmdRSC();
 }
 
