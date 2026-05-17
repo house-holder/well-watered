@@ -339,7 +339,6 @@ void initLittleFS() {
 }
 
 void initAPIRouting() {
-	// Basic page ---------------------------------------------------
 	server.on("/", HTTP_GET, [](Req *r) {
 		r->send(LittleFS, "/index.html", "text/html");
 	});
@@ -356,7 +355,7 @@ void initAPIRouting() {
 		r->send(LittleFS, "/wtr.ico", "image/x-icon");
 	});
 
-	// Routes -------------------------------------------------------
+	// Basic webapp utils -----------------------------------------------------
 	server.on("/api/state", HTTP_GET, [](Req *r) {
 		r->send(200, "application/json", getStateJSON());
 	});
@@ -429,6 +428,41 @@ void initAPIRouting() {
 			logger("Schedule saved");
 		}
 	);
+
+	// Device administration --------------------------------------------------
+	server.on("/api/fs", HTTP_GET, [](Req *r) {
+		JsonDocument doc;
+		JsonArray files = doc["files"].to<JsonArray>();
+		File root = LittleFS.open("/");
+		File f = root.openNextFile();
+		while (f) {
+			JsonObject file = files.add<JsonObject>();
+			file["name"] = f.name();
+			file["size"] = f.size();
+			f = root.openNextFile();
+		}
+		String out;
+		serializeJson(doc, out);
+		r->send(200, "application/json", out);
+	});
+
+	server.on("^\\/api\\/fs\\/delete\\/(.+)$", HTTP_POST, [](Req *r) {
+		String filename = "/" + r->pathArg(0);
+		if (LittleFS.remove(filename)) {
+			r->send(200, "application/json", "{\"ok\":true}");
+			logger("Deleted file '%s'", filename.c_str());
+		} else {
+			r->send(404, "application/json", "{\"error\":\"not found\"}");
+		}
+	});
+
+	server.on("^\\/api\\/fs\\/clear\\/(.+)$", HTTP_POST, [](Req *r) {
+		String filename = "/" + r->pathArg(0);
+		File f = LittleFS.open(filename, "w");
+		f.close();
+		logger("Cleared file '%s'", filename.c_str());
+		r->send(200, "application/json", "{\"ok\":true}");
+	});
 }
 
 
