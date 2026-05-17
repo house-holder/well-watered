@@ -274,6 +274,7 @@ void initPins() {
 		pinMode(zones[i].pin, OUTPUT);
 		pinMode(zones[i].LED.pin, OUTPUT);
 		zones[i].LED.off();
+		// DEBUG: statement below
 		Serial.printf("%s (z%d): C%d-L%d\n",
 				zones[i].name, i,
 				digitalRead(zones[i].pin),
@@ -385,8 +386,9 @@ void initAPIRouting() {
 		time(&zones[id].startTime);
 		r->send(200, "application/json", "{\"ok\":true}");
 		digitalWrite(zones[id].pin, HIGH);
-		// logger("%s ON", zones[id].name);
+		// DEBUG: statement below
 		logger("%s ON, pin=%d", zones[id].name, digitalRead(zones[id].pin));
+		// logger("%s ON", zones[id].name);
 	});
 
 	server.on(ZONE_DISABLE, HTTP_POST, [](Req *r) {
@@ -399,8 +401,9 @@ void initAPIRouting() {
 		zones[id].startTime = 0;
 		r->send(200, "application/json", "{\"ok\":true}");
 		digitalWrite(zones[id].pin, LOW);
-		// logger("%s OFF", zones[id].name);
+		// DEBUG: statement below
 		logger("%s OFF, pin=%d", zones[id].name, digitalRead(zones[id].pin));
+		// logger("%s OFF", zones[id].name);
 	});
 
 	server.on("/api/schedule/save", HTTP_POST, [](Req *r) {
@@ -438,6 +441,7 @@ void setup() {
 		Ok.on();
 		Warn.off();
 	}
+	// DEBUG: statement below
 	cmdRSC();
 }
 
