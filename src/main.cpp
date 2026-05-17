@@ -211,17 +211,17 @@ void powerMonitorTask(void*) {
         bool currentState = pwrOk24V();
         if (currentState != lastState) {
             if (currentState) {
-                logger("24V supply restored");
+                logger("24V OK");
                 Ok.on();
                 Warn.off();
             } else {
-                logger("24V supply lost");
+                logger("24V supply fault");
                 Ok.flash();
                 Warn.flash();
             }
             lastState = currentState;
         }
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 
@@ -269,17 +269,14 @@ void commandListener() {
 // Setup Functions ------------------------------------------------------------
 void initPins() {
 	Serial.println("Pin setup");
+
 	for (int i = 0; i < 3; i++) {
 		digitalWrite(zones[i].pin, LOW);
 		pinMode(zones[i].pin, OUTPUT);
 		pinMode(zones[i].LED.pin, OUTPUT);
 		zones[i].LED.off();
-		// DEBUG: statement below
-		Serial.printf("%s (z%d): C%d-L%d\n",
-				zones[i].name, i,
-				digitalRead(zones[i].pin),
-				digitalRead(zones[i].LED.pin));
 	}
+
 	pinMode(Ok.pin, OUTPUT);
 	pinMode(Warn.pin, OUTPUT);
 	pinMode(DC_OK, INPUT_PULLUP);
@@ -291,7 +288,6 @@ void initWifi() {
 	wifiMulti.addAP(PNET, PKEY);
 
 	Serial.printf("Connecting to network...");
-
 	unsigned long timer = 0;
 	while (wifiMulti.run() != WL_CONNECTED) {
 		unsigned long now = millis();
@@ -343,6 +339,7 @@ void initLittleFS() {
 }
 
 void initAPIRouting() {
+	// Basic page ---------------------------------------------------
 	server.on("/", HTTP_GET, [](Req *r) {
 		r->send(LittleFS, "/index.html", "text/html");
 	});
@@ -355,6 +352,11 @@ void initAPIRouting() {
 		r->send(LittleFS, "/style.css", "text/css");
 	});
 
+	server.on("/wtr.ico", HTTP_GET, [](Req *r) {
+		r->send(LittleFS, "/wtr.ico", "image/x-icon");
+	});
+
+	// Routes -------------------------------------------------------
 	server.on("/api/state", HTTP_GET, [](Req *r) {
 		r->send(200, "application/json", getStateJSON());
 	});
@@ -386,9 +388,7 @@ void initAPIRouting() {
 		time(&zones[id].startTime);
 		r->send(200, "application/json", "{\"ok\":true}");
 		digitalWrite(zones[id].pin, HIGH);
-		// DEBUG: statement below
-		logger("%s ON, pin=%d", zones[id].name, digitalRead(zones[id].pin));
-		// logger("%s ON", zones[id].name);
+		logger("%s ON", zones[id].name);
 	});
 
 	server.on(ZONE_DISABLE, HTTP_POST, [](Req *r) {
@@ -401,48 +401,59 @@ void initAPIRouting() {
 		zones[id].startTime = 0;
 		r->send(200, "application/json", "{\"ok\":true}");
 		digitalWrite(zones[id].pin, LOW);
-		// DEBUG: statement below
-		logger("%s OFF, pin=%d", zones[id].name, digitalRead(zones[id].pin));
-		// logger("%s OFF", zones[id].name);
+		logger("%s OFF", zones[id].name);
 	});
 
-	server.on("/api/schedule/save", HTTP_POST, [](Req *r) {
-		// we'll handle the body next
-		saveSchedule();
-		r->send(200, "application/json", "{\"ok\":true}");
-	});
+	server.on("/api/schedule/save", HTTP_POST,
+		[](Req *r) {
+			r->send(200, "application/json", "{\"ok\":true}");
+		},
+		nullptr,
+		[](Req *r, uint8_t *data, size_t len, size_t index, size_t total) {
+			JsonDocument doc;
+			deserializeJson(doc, data, len);
+			JsonArray arr = doc["zones"].as<JsonArray>();
+			for (JsonObject zone : arr) {
+				int id = zone["id"];
+				if (id < 0 || id > 2) continue;
+				zones[id].schedule.startHour = zone["startHour"];
+				zones[id].schedule.startMin  = zone["startMin"];
+				zones[id].schedule.stopHour  = zone["stopHour"];
+				zones[id].schedule.stopMin   = zone["stopMin"];
+				JsonArray days = zone["days"];
+				for (int d = 0; d < 7; d++) {
+					zones[id].schedule.days[d] = days[d];
+				}
+			}
+			saveSchedule();
+			logger("Schedule saved");
+		}
+	);
 }
 
 
 // Main: setup & loop ---------------------------------------------------------
 void setup() {
 	Serial.begin(115200);
-	initPins();
-
-	struct tm timeinfo;
 	xTaskCreate(ledTask, "LEDs", 2048, nullptr, 1, nullptr);
-	xTaskCreate(powerMonitorTask, "PWR", 2048, nullptr, 1, nullptr);
 
+	initPins();
 	initWifi();
+	struct tm timeinfo;
 	initNTP(timeinfo);
 	initMDNS();
 	initLittleFS();
 	initAPIRouting();
+
 	server.begin();
 
-	float startup = static_cast<float>(millis()) / 1000;
 	logger("Webserver running on %s", WiFi.localIP().toString().c_str());
-	logger("Boot sequence took %.1f seconds", startup, millis());
+	xTaskCreate(powerMonitorTask, "PWR", 2048, nullptr, 1, nullptr);
+	float startup = static_cast<float>(millis()) / 1000;
+	logger("Boot sequence took %.1f seconds", startup);
 
-	if (!pwrOk24V()) {
-		logger(" WARNING: 24V supply not ready");
-		Ok.flash();
-	} else {
-		Ok.on();
-		Warn.off();
-	}
-	// DEBUG: statement below
-	cmdRSC();
+	Ok.on();
+	Warn.off();
 }
 
 void loop() {
