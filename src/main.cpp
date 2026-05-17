@@ -5,12 +5,9 @@
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
-#include <WiFiMulti.h>
 #include <driver/gpio.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
-
-WiFiMulti wifiMulti;
 
 AsyncWebServer server(80);
 using Req = AsyncWebServerRequest;
@@ -19,6 +16,8 @@ const char* ZONE_ENABLE  = "^\\/api\\/zones\\/(\\d+)\\/enable$";
 const char* ZONE_DISABLE = "^\\/api\\/zones\\/(\\d+)\\/disable$";
 
 const int DC_OK = 4;
+
+bool syncOkNTP = false;
 
 bool pwrOk24V() {
 	return digitalRead(DC_OK) == LOW;
@@ -66,6 +65,9 @@ struct StatLED {
 	}
 };
 
+StatLED Ok = { 14, 1000, 4000, OFF, 0 };
+StatLED Warn = { 13, 100, 400, FLASH, 0 };
+
 struct Schedule {
 	bool days[7];
 	int startHour;
@@ -74,30 +76,37 @@ struct Schedule {
 	int stopMin;
 };
 
-struct Zone {
-	int pin;
-	bool running;
-	const char* name;
-	time_t startTime;
-	Schedule schedule;
-	StatLED LED;
-};
-
 const Schedule DEFAULT_SCHEDULE = {
 	.days  = { false, false, false, false, false, false, false },
 	.startHour = 6, .startMin = 0, .stopHour  = 7, .stopMin  = 15
 };
 
-StatLED Ok = { 14, 1000, 4000, OFF, 0 };
-StatLED Warn = { 13, 100, 400, FLASH, 0 };
+enum runMode { IDLE, SCHD, OVRD };
+
+struct Zone {
+	int pin;
+	runMode mode;
+	const char* name;
+	time_t startTime;
+	Schedule schedule;
+	StatLED LED;
+
+	bool running() { return mode != IDLE; }
+};
 
 Zone zones[3] = {
-	{ .pin=16, .name="Garden faucet", .schedule=DEFAULT_SCHEDULE,
-		.LED={ .pin=25, .onTime=200, .cycleTime=800 }, },
-	{ .pin=17, .name="House faucet",  .schedule=DEFAULT_SCHEDULE,
-		.LED={ .pin=26, .onTime=200, .cycleTime=800 }, },
-	{ .pin=18, .name="Shed faucet",   .schedule=DEFAULT_SCHEDULE,
-		.LED={ .pin=27, .onTime=200, .cycleTime=800 }, },
+	{
+		.pin=16, .mode=IDLE, .name="Garden", .schedule=DEFAULT_SCHEDULE,
+		.LED={ .pin=25, .onTime=200, .cycleTime=800 },
+	},
+	{
+		.pin=17, .mode=IDLE, .name="House", .schedule=DEFAULT_SCHEDULE,
+		.LED={ .pin=26, .onTime=200, .cycleTime=800 },
+	},
+	{
+		.pin=18, .mode=IDLE, .name="Shed", .schedule=DEFAULT_SCHEDULE,
+		.LED={ .pin=27, .onTime=200, .cycleTime=800 },
+	},
 };
 
 
@@ -111,8 +120,8 @@ String getStateJSON() {
 		JsonObject obj = zonesArr.add<JsonObject>();
 		obj["id"] = i;
 		obj["name"] = z.name;
-		obj["running"] = z.running;
-		if (z.running && z.startTime > 0) {
+		obj["running"] = z.running();
+		if (z.running() && z.startTime > 0) {
 			char buf[6];
 			struct tm* t = localtime(&z.startTime);
 			strftime(buf, sizeof(buf), "%H:%M", t);
@@ -173,6 +182,50 @@ void loadSchedule() {
 	}
 }
 
+int minutesNow(struct tm &t) {
+    return t.tm_hour * 60 + t.tm_min;
+}
+
+int minutesOf(int hour, int min) {
+    return hour * 60 + min;
+}
+
+bool isDayActive(Schedule &s, struct tm &t) {
+    int today     = t.tm_wday;
+    int yesterday = (today + 6) % 7;
+
+    int now   = minutesNow(t);
+    int start = minutesOf(s.startHour, s.startMin);
+    int stop  = minutesOf(s.stopHour,  s.stopMin);
+
+    if (start <= stop) {
+        return s.days[today];
+    } else {
+        if (now >= start) {
+            return s.days[today];
+        } else {
+            return s.days[yesterday];
+        }
+    }
+}
+
+bool shouldBeActive(Schedule &s, struct tm &t) {
+    int now   = minutesNow(t);
+    int start = minutesOf(s.startHour, s.startMin);
+    int stop  = minutesOf(s.stopHour,  s.stopMin);
+
+    if (start <= stop) {
+        return now >= start && now < stop;
+    } else {
+        return now >= start || now < stop;
+    }
+}
+
+bool zoneShouldBeActive(Zone &zone, struct tm &t) {
+    return isDayActive(zone.schedule, t) &&
+           shouldBeActive(zone.schedule, t);
+}
+
 const char* timestamp() {
 	static char buf[16];
 	struct tm t;
@@ -198,7 +251,7 @@ void ledTask(void*) {
 		Warn.tick();
 		for (int i = 0; i < 3; i++) {
 			// could do a check for problems and flash light if any exist?
-			zones[i].LED.mode = zones[i].running ? ON : OFF;
+			zones[i].LED.mode = zones[i].running() ? ON : OFF;
 			zones[i].LED.tick();
 		}
 		vTaskDelay(50 / portTICK_PERIOD_MS);
@@ -222,6 +275,32 @@ void powerMonitorTask(void*) {
             lastState = currentState;
         }
         vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+}
+
+void scheduleTask(void*) {
+    while (true) {
+        struct tm t;
+        if (getLocalTime(&t)) {
+            for (int i = 0; i < 3; i++) {
+                bool dayOk    = isDayActive(zones[i].schedule, t);
+                bool timeOk   = shouldBeActive(zones[i].schedule, t);
+                bool shouldRun = dayOk && timeOk;
+
+				if (shouldRun && zones[i].mode == IDLE) {
+					zones[i].mode = SCHD;
+					time(&zones[i].startTime);
+					digitalWrite(zones[i].pin, HIGH);
+					logger("Schedule: %s ON", zones[i].name);
+				} else if (!shouldRun && zones[i].mode == SCHD) {
+					zones[i].mode = IDLE;
+					zones[i].startTime = 0;
+					digitalWrite(zones[i].pin, LOW);
+					logger("Schedule: %s OFF", zones[i].name);
+				}
+            }
+        }
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
     }
 }
 
@@ -268,8 +347,6 @@ void commandListener() {
 
 // Setup Functions ------------------------------------------------------------
 void initPins() {
-	Serial.println("Pin setup");
-
 	for (int i = 0; i < 3; i++) {
 		digitalWrite(zones[i].pin, LOW);
 		pinMode(zones[i].pin, OUTPUT);
@@ -283,13 +360,10 @@ void initPins() {
 }
 
 void initWifi() {
-    wifiMulti.addAP(HOUSENET, HOUSEKEY);
-    wifiMulti.addAP(CGINET, CGIKEY);
-	wifiMulti.addAP(PNET, PKEY);
-
 	Serial.printf("Connecting to network...");
+	WiFi.begin(WNET, WKEY);
 	unsigned long timer = 0;
-	while (wifiMulti.run() != WL_CONNECTED) {
+	while (WiFi.status() != WL_CONNECTED) {
 		unsigned long now = millis();
 		if (now - timer >= 500) {
 			Serial.print(".");
@@ -317,6 +391,7 @@ void initNTP(tm &timeinfo) {
 	}
 
 	Serial.println(&timeinfo, " synced, time now: %H:%M:%S");
+	syncOkNTP = true;
 }
 
 void initMDNS() {
@@ -383,7 +458,7 @@ void initAPIRouting() {
 			r->send(400, "application/json", "{\"error\":\"invalid zone\"}");
 			return;
 		}
-		zones[id].running = true;
+		zones[id].mode = OVRD;
 		time(&zones[id].startTime);
 		r->send(200, "application/json", "{\"ok\":true}");
 		digitalWrite(zones[id].pin, HIGH);
@@ -396,7 +471,7 @@ void initAPIRouting() {
 			r->send(400, "application/json", "{\"error\":\"invalid zone\"}");
 			return;
 		}
-		zones[id].running = false;
+		zones[id].mode = IDLE;
 		zones[id].startTime = 0;
 		r->send(200, "application/json", "{\"ok\":true}");
 		digitalWrite(zones[id].pin, LOW);
@@ -485,6 +560,7 @@ void setup() {
 	xTaskCreate(powerMonitorTask, "PWR", 2048, nullptr, 1, nullptr);
 	float startup = static_cast<float>(millis()) / 1000;
 	logger("Boot sequence took %.1f seconds", startup);
+	xTaskCreate(scheduleTask, "Schedule", 2048, nullptr, 1, nullptr);
 
 	Ok.on();
 	Warn.off();
