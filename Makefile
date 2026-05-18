@@ -1,4 +1,4 @@
-.PHONY: upload uploadfs monitor run runmon
+.PHONY: upload uploadfs monitor run runmon size clean compiledb app firmware full
 
 upload:
 	pio run --target upload
@@ -18,10 +18,8 @@ clean:
 compiledb:
 	pio run --target compiledb
 
-run: upload uploadfs
+app: uploadfs monitor
 
-upmon: upload monitor
+firmware: upload monitor
 
-fsmon: uploadfs monitor
-
-allmon: upload uploadfs monitor
+full: upload uploadfs monitor
