@@ -122,6 +122,7 @@ String getStateJSON() {
 		obj["id"] = i;
 		obj["name"] = z.name;
 		obj["running"] = z.running();
+		obj["stopTime"] = z.stopTime;
 		if (z.running() && z.startTime > 0) {
 			char buf[6];
 			struct tm* t = localtime(&z.startTime);
@@ -447,24 +448,33 @@ void initAPIRouting() {
 		r->send(200, "application/json", content);
 	});
 
-	server.on(ZONE_ENABLE, HTTP_POST, [](Req *r) {
-		if (!pwrOk24V()) {
-			r->send(503, "application/json", "{\"error\":\"24V not ready\"}");
-			logger("Zone enable rejected - 24VDC supply fault");
-			return;	
-		}
+	server.on(ZONE_ENABLE, HTTP_POST,
+		[](Req *r) {
+			if (!pwrOk24V()) {
+				r->send(503, "application/json", "{\"error\":\"24V not ready\"}");
+				logger("Zone enable rejected - 24VDC supply fault");
+				return;
+			}
+			r->send(200, "application/json", "{\"ok\":true}");
+		},
+		nullptr,
+		[](Req *r, uint8_t *data, size_t len, size_t index, size_t total) {
+			if (!pwrOk24V()) return;
 
-		int id = r->pathArg(0).toInt();
-		if (id < 0 || id > 2) {
-			r->send(400, "application/json", "{\"error\":\"invalid zone\"}");
-			return;
+			int id = r->pathArg(0).toInt();
+			if (id < 0 || id > 2) return;
+
+			JsonDocument doc;
+			deserializeJson(doc, data, len);
+			int duration = doc["duration"] | 120;
+
+			zones[id].mode = OVRD;
+			time(&zones[id].startTime);
+			zones[id].stopTime = zones[id].startTime + (duration * 60);
+			digitalWrite(zones[id].pin, HIGH);
+			logger("%s ON, duration=%dmin", zones[id].name, duration);
 		}
-		zones[id].mode = OVRD;
-		time(&zones[id].startTime);
-		r->send(200, "application/json", "{\"ok\":true}");
-		digitalWrite(zones[id].pin, HIGH);
-		logger("%s ON", zones[id].name);
-	});
+	);
 
 	server.on(ZONE_DISABLE, HTTP_POST, [](Req *r) {
 		int id = r->pathArg(0).toInt();

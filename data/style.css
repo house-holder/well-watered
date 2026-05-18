@@ -176,6 +176,11 @@ h2 {
     background: #f5f0e8;
     border-radius: 10px;
     padding: 0.25rem;
+	min-width: 132px;
+}
+
+.duration-picker.countdown-active {
+	background: transparent;
 }
 
 .dur-btn {
@@ -190,7 +195,12 @@ h2 {
     cursor: pointer;
 }
 
+.dur-btn.hidden {
+	display: none;
+}
+
 .duration-display {
+	flex: 1;
     min-width: 2.8rem;
     text-align: center;
     font-size: 1rem;
