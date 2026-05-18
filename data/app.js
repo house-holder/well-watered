@@ -59,14 +59,14 @@ function updatePickerUI(card, zoneId) {
 		plus.classList.remove('hidden');
 		picker.classList.remove('countdown-active');
 		disp.textContent = fmtDuration(state.duration);
-	} else if (state.mode === 'active') {
+	} else if (state.mode === 'override') {
 		minus.classList.add('hidden');
 		plus.classList.add('hidden');
 		picker.classList.add('countdown-active');
 	} else if (state.mode === 'grace') {
 		minus.classList.add('hidden');
 		plus.classList.add('hidden');
-	} else if (state.mode === 'scheduled') {
+	} else if (state.mode === 'scheduled' || state.mode === 'paused') {
 		picker.style.display = 'none';
 	}
 }
@@ -112,17 +112,14 @@ function applyState(data) {
 		const btn = card.querySelector('.override-btn');
 		
 		if (zone.running) {
-			console.log(
-				`zone ${zone.id}: stopTime=${zone.stopTime}, mode=${zone.mode}`
-			);
 			badge.textContent = 'ON';
 			badge.classList.add('on');
 			since.textContent = zone.since ? `${fmtTime(zone.since)}` : '';
-			btn.textContent = 'Disable';
 			btn.classList.add('active');
+			btn.textContent = zone.mode === 'scheduled' ? 'Pause' : 'Disable';
 			zoneState[zone.id].mode = zone.mode;
 
-			if (zone.running && zone.stopTime > 0 && zone.mode === 'override') {
+			if (zone.mode === 'override' && zone.stopTime > 0) {
 				if (zoneState[zone.id].countdown) {
 					clearInterval(zoneState[zone.id].countdown);
 					zoneState[zone.id].countdown = null;
@@ -132,6 +129,15 @@ function applyState(data) {
 				);
 				startCountdown(card, zone.id, remaining);
 			}
+
+		} else if (zone.mode === 'paused') {
+			badge.textContent = 'OFF';
+			badge.classList.remove('on');
+			since.textContent = '';
+			btn.textContent = 'Resume';
+			btn.classList.remove('active');
+			zoneState[zone.id].mode = 'paused';
+
 		} else {
 			badge.textContent = 'OFF';
 			badge.classList.remove('on');
@@ -291,13 +297,7 @@ async function init() {
 					startCountdown(card, zoneId, state.duration * 60);
 				}
 
-			} else if (state.mode === 'grace') {
-				clearInterval(state.timer);
-				btn.textContent = 'Enable';
-				state.mode = 'idle';
-				updatePickerUI(card, zoneId);
-
-			} else if (state.mode === 'active') {
+			} else if (state.mode === 'override') {
 				if (state.countdown) {
 					console.log('countdown ref: ', state.countdown);
 					clearInterval(state.countdown);
@@ -309,6 +309,28 @@ async function init() {
 				await fetch(`/api/zones/${zoneId}/disable`, { method: 'POST' });
 				const data = await fetchState();
 				applyState(data);
+
+			} else if (state.mode === 'paused') {
+				await fetch(`/api/zones/${zoneId}/resume`, { method: 'POST' });
+				let attempts = 0;
+				const poll = setInterval(async () => {
+					attempts++;
+					const data = await fetchState();
+					applyState(data);
+					if (zoneState[zoneId].mode === 'scheduled' || attempts > 10) {
+						clearInterval(poll);
+					}
+				}, 100);
+
+			} else if (state.mode === 'scheduled') {
+				await fetch(`/api/zones/${zoneId}/pause`, { method: 'POST' });
+				const data = await fetchState();
+				applyState(data);
+
+			} else if (state.mode === 'grace') {
+				clearInterval(state.timer);
+				btn.textContent = 'Enable';
+				state.mode = 'idle';
 				updatePickerUI(card, zoneId);
 			}
 		});
@@ -350,6 +372,13 @@ async function init() {
 	});
 }
 
+document.addEventListener('visibilitychange', () => {
+	if (document.visibilityState === 'visible') {
+		fetchState().then(applyState);
+	}
+});
+
 init();
 updateClock();
 setInterval(updateClock, 1000);
+

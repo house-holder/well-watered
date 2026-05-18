@@ -14,6 +14,8 @@ using Req = AsyncWebServerRequest;
 
 const char* ZONE_ENABLE  = "^\\/api\\/zones\\/(\\d+)\\/enable$";
 const char* ZONE_DISABLE = "^\\/api\\/zones\\/(\\d+)\\/disable$";
+const char* ZONE_PAUSE  = "^\\/api\\/zones\\/(\\d+)\\/pause$";
+const char* ZONE_RESUME = "^\\/api\\/zones\\/(\\d+)\\/resume$";
 
 const int DC_OK = 4;
 
@@ -77,41 +79,139 @@ struct Schedule {
 };
 
 const Schedule DEFAULT_SCHEDULE = {
-	.days  = { false, false, false, false, false, false, false },
+	.days = { false, false, false, false, false, false, false },
 	.startHour = 6, .startMin = 0, .stopHour  = 7, .stopMin  = 15
 };
 
-enum runMode { IDLE, SCHD, OVRD };
+enum RunMode { IDLE, SCHD, OVRD };
 
 struct Zone {
-	int pin;
-	runMode mode;
-	const char* name;
-	time_t startTime;
-	time_t stopTime;
-	Schedule schedule;
-	StatLED LED;
+    int pin;
+    RunMode mode;
+    const char* name;
+    time_t startTime;
+    time_t stopTime;
+    time_t pausedUntil;
+    time_t skipUntil;
+    Schedule schedule;
+    StatLED LED;
 
-	bool running() { return mode != IDLE; }
+    bool isRunning()   { return mode != IDLE; }
+    bool isOverride()  { return mode == OVRD; }
+    bool isScheduled() { return mode == SCHD; }
+    bool isPaused()    { return pausedUntil > 0; }
+
+    void enable(int durationMins) {
+        mode = OVRD;
+        time(&startTime);
+        stopTime = startTime + (durationMins * 60);
+        pausedUntil = 0;
+        digitalWrite(pin, HIGH);
+    }
+
+    void disable() {
+        mode = IDLE;
+        startTime = 0;
+        stopTime = 0;
+        pausedUntil = 0;
+        digitalWrite(pin, LOW);
+    }
+
+    void pause() {
+        struct tm t;
+        getLocalTime(&t);
+        t.tm_hour = schedule.stopHour;
+        t.tm_min  = schedule.stopMin;
+        t.tm_sec  = 0;
+        pausedUntil = mktime(&t);
+        mode = IDLE;
+        startTime = 0;
+        digitalWrite(pin, LOW);
+    }
+
+    void resume() {
+        pausedUntil = 0;
+    }
+
+    void scheduleStart() {
+        mode = SCHD;
+        time(&startTime);
+        stopTime = 0;
+        pausedUntil = 0;
+        digitalWrite(pin, HIGH);
+    }
+
+    void scheduleStop() {
+        mode = IDLE;
+        startTime = 0;
+        stopTime = 0;
+        digitalWrite(pin, LOW);
+    }
 };
 
 Zone zones[3] = {
-	{
-		.pin=16, .mode=IDLE, .name="Garden", .schedule=DEFAULT_SCHEDULE,
-		.LED={ .pin=25, .onTime=200, .cycleTime=800 },
-	},
-	{
-		.pin=17, .mode=IDLE, .name="House", .schedule=DEFAULT_SCHEDULE,
-		.LED={ .pin=26, .onTime=200, .cycleTime=800 },
-	},
-	{
-		.pin=18, .mode=IDLE, .name="Shed", .schedule=DEFAULT_SCHEDULE,
-		.LED={ .pin=27, .onTime=200, .cycleTime=800 },
-	},
+    {	.pin=16, .mode=IDLE, .name="Garden",
+        .startTime=0, .stopTime=0, .pausedUntil=0, .skipUntil=0,
+        .schedule=DEFAULT_SCHEDULE,
+        .LED={ .pin=25, .onTime=200, .cycleTime=800 },
+    },
+    {	.pin=17, .mode=IDLE, .name="House",
+        .startTime=0, .stopTime=0, .pausedUntil=0, .skipUntil=0,
+        .schedule=DEFAULT_SCHEDULE,
+        .LED={ .pin=26, .onTime=200, .cycleTime=800 },
+    },
+    {	.pin=18, .mode=IDLE, .name="Shed",
+        .startTime=0, .stopTime=0, .pausedUntil=0, .skipUntil=0,
+        .schedule=DEFAULT_SCHEDULE,
+        .LED={ .pin=27, .onTime=200, .cycleTime=800 },
+    },
 };
 
 
 // Accessory functions --------------------------------------------------------
+int minutesNow(struct tm &t) {
+    return t.tm_hour * 60 + t.tm_min;
+}
+
+int minutesOf(int hour, int min) {
+    return hour * 60 + min;
+}
+
+bool isDayActive(Schedule &s, struct tm &t) {
+    int today     = t.tm_wday;
+    int yesterday = (today + 6) % 7;
+
+    int now   = minutesNow(t);
+    int start = minutesOf(s.startHour, s.startMin);
+    int stop  = minutesOf(s.stopHour,  s.stopMin);
+
+    if (start <= stop) {
+        return s.days[today];
+    } else {
+        if (now >= start) {
+            return s.days[today];
+        } else {
+            return s.days[yesterday];
+        }
+    }
+}
+
+bool shouldBeActive(Schedule &s, struct tm &t) {
+    int now   = minutesNow(t);
+    int start = minutesOf(s.startHour, s.startMin);
+    int stop  = minutesOf(s.stopHour,  s.stopMin);
+
+    if (start <= stop) {
+        return now >= start && now < stop;
+    } else {
+        return now >= start || now < stop;
+    }
+}
+
+bool zoneShouldBeActive(Zone &zone, struct tm &t) {
+    return isDayActive(zone.schedule, t) &&
+           shouldBeActive(zone.schedule, t);
+}
 String getStateJSON() {
 	JsonDocument doc;
 	JsonArray zonesArr = doc["zones"].to<JsonArray>();
@@ -120,16 +220,22 @@ String getStateJSON() {
 		JsonObject obj = zonesArr.add<JsonObject>();
 
 		Zone& z = zones[i];
-		const char* modeStr =	z.mode == OVRD ? "override" :
-								z.mode == SCHD ? "scheduled" :
-								"idle";
-		obj["id"] = i;
+		time_t nowT;
+		time(&nowT);
+		struct tm* tNow = localtime(&nowT);
+		bool stillInWindow = shouldBeActive(z.schedule, *tNow);
+		const char* modeStr = z.mode == OVRD ? "override"  :
+							  z.mode == SCHD ? "scheduled" :
+							  (z.isPaused() && stillInWindow) ? "paused" :
+							  "idle";
+		obj["id"]		   = i;
+		obj["mode"]        = modeStr;
+		obj["running"]	   = z.isRunning();
+		obj["stopTime"]    = z.stopTime;
+		obj["pausedUntil"] = z.pausedUntil;
 		obj["name"] = z.name;
-		obj["running"] = z.running();
-		obj["stopTime"] = z.stopTime;
-		obj["mode"] = modeStr;
 
-		if (z.running() && z.startTime > 0) {
+		if (z.isRunning() && z.startTime > 0) {
 			char buf[6];
 			struct tm* t = localtime(&z.startTime);
 			strftime(buf, sizeof(buf), "%H:%M", t);
@@ -190,50 +296,6 @@ void loadSchedule() {
 	}
 }
 
-int minutesNow(struct tm &t) {
-    return t.tm_hour * 60 + t.tm_min;
-}
-
-int minutesOf(int hour, int min) {
-    return hour * 60 + min;
-}
-
-bool isDayActive(Schedule &s, struct tm &t) {
-    int today     = t.tm_wday;
-    int yesterday = (today + 6) % 7;
-
-    int now   = minutesNow(t);
-    int start = minutesOf(s.startHour, s.startMin);
-    int stop  = minutesOf(s.stopHour,  s.stopMin);
-
-    if (start <= stop) {
-        return s.days[today];
-    } else {
-        if (now >= start) {
-            return s.days[today];
-        } else {
-            return s.days[yesterday];
-        }
-    }
-}
-
-bool shouldBeActive(Schedule &s, struct tm &t) {
-    int now   = minutesNow(t);
-    int start = minutesOf(s.startHour, s.startMin);
-    int stop  = minutesOf(s.stopHour,  s.stopMin);
-
-    if (start <= stop) {
-        return now >= start && now < stop;
-    } else {
-        return now >= start || now < stop;
-    }
-}
-
-bool zoneShouldBeActive(Zone &zone, struct tm &t) {
-    return isDayActive(zone.schedule, t) &&
-           shouldBeActive(zone.schedule, t);
-}
-
 const char* timestamp() {
 	static char buf[16];
 	struct tm t;
@@ -259,7 +321,7 @@ void ledTask(void*) {
 		Warn.tick();
 		for (int i = 0; i < 3; i++) {
 			// could do a check for problems and flash light if any exist?
-			zones[i].LED.mode = zones[i].running() ? ON : OFF;
+			zones[i].LED.mode = zones[i].isRunning() ? ON : OFF;
 			zones[i].LED.tick();
 		}
 		vTaskDelay(50 / portTICK_PERIOD_MS);
@@ -285,31 +347,40 @@ void powerMonitorTask(void*) {
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
-
 void scheduleTask(void*) {
     while (true) {
         struct tm t;
         if (getLocalTime(&t)) {
             for (int i = 0; i < 3; i++) {
-                bool dayOk    = isDayActive(zones[i].schedule, t);
-                bool timeOk   = shouldBeActive(zones[i].schedule, t);
-                bool shouldRun = dayOk && timeOk;
+                time_t now;
+                time(&now);
 
-				if (shouldRun && zones[i].mode == IDLE) {
-					zones[i].mode = SCHD;
-					time(&zones[i].startTime);
-					digitalWrite(zones[i].pin, HIGH);
+                if (zones[i].isPaused() && now >= zones[i].pausedUntil) {
+                    zones[i].pausedUntil = 0;
+                    logger("%s pause expired", zones[i].name);
+                }
+
+                bool shouldRun = zoneShouldBeActive(zones[i], t);
+
+				if (shouldRun && zones[i].mode == IDLE && !zones[i].isPaused()) {
+					zones[i].scheduleStart();
 					logger("Schedule: %s ON", zones[i].name);
 				} else if (!shouldRun && zones[i].mode == SCHD) {
-					zones[i].mode = IDLE;
-					zones[i].startTime = 0;
-					digitalWrite(zones[i].pin, LOW);
+					zones[i].scheduleStop();
 					logger("Schedule: %s OFF", zones[i].name);
 				}
-            }
-        }
-        vTaskDelay(5000 / portTICK_PERIOD_MS);
-    }
+
+				if (zones[i].isOverride()
+					&& zones[i].stopTime > 0
+					&& now >= zones[i].stopTime
+				) {
+					zones[i].disable();
+					logger("Override: %s auto-stopped", zones[i].name);
+				}
+			}
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+		}
+	}
 }
 
 // Serial commands ------------------------------------------------------------
@@ -466,18 +537,12 @@ void initAPIRouting() {
 		nullptr,
 		[](Req *r, uint8_t *data, size_t len, size_t index, size_t total) {
 			if (!pwrOk24V()) return;
-
 			int id = r->pathArg(0).toInt();
 			if (id < 0 || id > 2) return;
-
 			JsonDocument doc;
 			deserializeJson(doc, data, len);
 			int duration = doc["duration"] | 120;
-
-			zones[id].mode = OVRD;
-			time(&zones[id].startTime);
-			zones[id].stopTime = zones[id].startTime + (duration * 60);
-			digitalWrite(zones[id].pin, HIGH);
+			zones[id].enable(duration);
 			logger("%s ON, duration=%dmin", zones[id].name, duration);
 		}
 	);
@@ -488,11 +553,34 @@ void initAPIRouting() {
 			r->send(400, "application/json", "{\"error\":\"invalid zone\"}");
 			return;
 		}
-		zones[id].mode = IDLE;
-		zones[id].startTime = 0;
+		zones[id].disable();
 		r->send(200, "application/json", "{\"ok\":true}");
-		digitalWrite(zones[id].pin, LOW);
 		logger("%s OFF", zones[id].name);
+	});
+
+	server.on(ZONE_PAUSE, HTTP_POST, [](Req *r) {
+		int id = r->pathArg(0).toInt();
+		if (id < 0 || id > 2) {
+			r->send(400, "application/json", "{\"error\":\"invalid zone\"}");
+			return;
+		}
+		zones[id].pause();
+		logger("%s paused until %02d:%02d",
+			zones[id].name,
+			zones[id].schedule.stopHour,
+			zones[id].schedule.stopMin);
+		r->send(200, "application/json", "{\"ok\":true}");
+	});
+
+	server.on(ZONE_RESUME, HTTP_POST, [](Req *r) {
+		int id = r->pathArg(0).toInt();
+		if (id < 0 || id > 2) {
+			r->send(400, "application/json", "{\"error\":\"invalid zone\"}");
+			return;
+		}
+		zones[id].resume();
+		logger("%s resumed", zones[id].name);
+		r->send(200, "application/json", "{\"ok\":true}");
 	});
 
 	server.on("/api/schedule/save", HTTP_POST,
