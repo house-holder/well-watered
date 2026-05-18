@@ -299,12 +299,8 @@ async function init() {
 
 			} else if (state.mode === 'override') {
 				if (state.countdown) {
-					console.log('countdown ref: ', state.countdown);
 					clearInterval(state.countdown);
 					state.countdown = null;
-					console.log('cleared');
-				} else {
-					console.log('countdown was null, nothing to clear');
 				}
 				await fetch(`/api/zones/${zoneId}/disable`, { method: 'POST' });
 				const data = await fetchState();
@@ -381,4 +377,3 @@ document.addEventListener('visibilitychange', () => {
 init();
 updateClock();
 setInterval(updateClock, 1000);
-
