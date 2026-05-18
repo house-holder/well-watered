@@ -88,6 +88,7 @@ struct Zone {
 	runMode mode;
 	const char* name;
 	time_t startTime;
+	time_t stopTime;
 	Schedule schedule;
 	StatLED LED;
 
