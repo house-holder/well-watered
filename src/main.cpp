@@ -117,12 +117,18 @@ String getStateJSON() {
 	JsonArray zonesArr = doc["zones"].to<JsonArray>();
 
 	for (int i = 0; i < 3; i++) {
-		Zone& z = zones[i];
 		JsonObject obj = zonesArr.add<JsonObject>();
+
+		Zone& z = zones[i];
+		const char* modeStr =	z.mode == OVRD ? "override" :
+								z.mode == SCHD ? "scheduled" :
+								"idle";
 		obj["id"] = i;
 		obj["name"] = z.name;
 		obj["running"] = z.running();
 		obj["stopTime"] = z.stopTime;
+		obj["mode"] = modeStr;
+
 		if (z.running() && z.startTime > 0) {
 			char buf[6];
 			struct tm* t = localtime(&z.startTime);

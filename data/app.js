@@ -93,30 +93,6 @@ function fmtCountdown(seconds) {
 	return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-function startCountdown(card, zoneId, initialSeconds) {
-	let remaining = initialSeconds;
-	const state = zoneState[zoneId];
-	const disp  = card.querySelector('.duration-display');
-
-	disp.textContent = fmtCountdown(remaining);
-	updatePickerUI(card, zoneId);
-
-	state.countdown = setInterval(async () => {
-		remaining--;
-		disp.textContent = fmtCountdown(remaining);
-
-		if (remaining <= 0) {
-			clearInterval(state.countdown);
-			state.countdown = null;
-			await fetch(`/api/zones/${zoneId}/disable`, { method: 'POST' });
-			const data = await fetchState();
-			applyState(data);
-			state.mode = 'idle';
-			updatePickerUI(card, zoneId);
-		}
-	}, 1000);
-}
-
 // active functions -----------------------------------------------------------
 async function fetchState() {
 	const resp = await fetch('/api/state');
@@ -136,14 +112,21 @@ function applyState(data) {
 		const btn = card.querySelector('.override-btn');
 		
 		if (zone.running) {
+			console.log(
+				`zone ${zone.id}: stopTime=${zone.stopTime}, mode=${zone.mode}`
+			);
 			badge.textContent = 'ON';
 			badge.classList.add('on');
 			since.textContent = zone.since ? `${fmtTime(zone.since)}` : '';
 			btn.textContent = 'Disable';
 			btn.classList.add('active');
-			zoneState[zone.id].mode = 'active';
+			zoneState[zone.id].mode = zone.mode;
 
-			if (zone.running && zone.stopTime > 0) {
+			if (zone.running && zone.stopTime > 0 && zone.mode === 'override') {
+				if (zoneState[zone.id].countdown) {
+					clearInterval(zoneState[zone.id].countdown);
+					zoneState[zone.id].countdown = null;
+				}
 				const remaining = Math.max(
 					0, zone.stopTime - Math.floor(Date.now() / 1000)
 				);
@@ -160,6 +143,35 @@ function applyState(data) {
 
 		updatePickerUI(card, zone.id);
 	});
+}
+
+function startCountdown(card, zoneId, initialSeconds) {
+	const state = zoneState[zoneId];
+	if (state.countdown) {
+		clearInterval(state.countdown);
+		state.countdown = null;
+	}
+
+	let remaining = initialSeconds;
+	const disp  = card.querySelector('.duration-display');
+	disp.textContent = fmtCountdown(remaining);
+
+	updatePickerUI(card, zoneId);
+
+	state.countdown = setInterval(async () => {
+		remaining--;
+		disp.textContent = fmtCountdown(remaining);
+
+		if (remaining <= 0) {
+			clearInterval(state.countdown);
+			state.countdown = null;
+			await fetch(`/api/zones/${zoneId}/disable`, { method: 'POST' });
+			const data = await fetchState();
+			applyState(data);
+			state.mode = 'idle';
+			updatePickerUI(card, zoneId);
+		}
+	}, 1000);
 }
 
 async function fetchSchedule() {
@@ -262,7 +274,6 @@ async function init() {
 							const data = await fetchState();
 							applyState(data);
 							btn.textContent = 'Disable';
-							state.mode = 'active';
 							startCountdown(card, zoneId, state.duration * 60);
 						}
 					}, 1000);
@@ -276,7 +287,6 @@ async function init() {
 					});
 					const data = await fetchState();
 					applyState(data);
-					state.mode = 'active';
 					btn.textContent = 'Disable';
 					startCountdown(card, zoneId, state.duration * 60);
 				}
@@ -289,13 +299,16 @@ async function init() {
 
 			} else if (state.mode === 'active') {
 				if (state.countdown) {
+					console.log('countdown ref: ', state.countdown);
 					clearInterval(state.countdown);
 					state.countdown = null;
+					console.log('cleared');
+				} else {
+					console.log('countdown was null, nothing to clear');
 				}
 				await fetch(`/api/zones/${zoneId}/disable`, { method: 'POST' });
 				const data = await fetchState();
 				applyState(data);
-				state.mode = 'idle';
 				updatePickerUI(card, zoneId);
 			}
 		});
