@@ -35,7 +35,7 @@ function populateTimePickers() {
 			opt.textContent = String(i).padStart(2, '0');
 			select.appendChild(opt);
 		}
-	});	
+	});
 }
 
 function snapDown(mins) {
@@ -47,11 +47,11 @@ function snapUp(mins) {
 }
 
 function updatePickerUI(card, zoneId) {
-	const state  = zoneState[zoneId];
+	const state = zoneState[zoneId];
 	const picker = card.querySelector('.duration-picker');
-	const minus  = card.querySelector('.dur-btn.minus');
-	const plus   = card.querySelector('.dur-btn.plus');
-	const disp   = card.querySelector('.duration-display');
+	const minus = card.querySelector('.dur-btn.minus');
+	const plus = card.querySelector('.dur-btn.plus');
+	const disp = card.querySelector('.duration-display');
 
 	if (state.mode === 'idle') {
 		picker.style.display = 'flex';
@@ -110,7 +110,7 @@ function applyState(data) {
 		const badge = card.querySelector('.status-badge');
 		const since = card.querySelector('.status-since');
 		const btn = card.querySelector('.override-btn');
-		
+
 		if (zone.running) {
 			badge.textContent = 'ON';
 			badge.classList.add('on');
@@ -159,7 +159,7 @@ function startCountdown(card, zoneId, initialSeconds) {
 	}
 
 	let remaining = initialSeconds;
-	const disp  = card.querySelector('.duration-display');
+	const disp = card.querySelector('.duration-display');
 	disp.textContent = fmtCountdown(remaining);
 
 	updatePickerUI(card, zoneId);
@@ -195,7 +195,7 @@ async function saveSchedule() {
 
 		const startPicker = card.querySelector('.time-picker[data-type="start"]');
 		const startHour12 = parseInt(startPicker.querySelector('.t-hour').value);
-		const startMin  = parseInt(startPicker.querySelector('.t-minute').value);
+		const startMin = parseInt(startPicker.querySelector('.t-minute').value);
 		const startAmpm = startPicker.querySelector('.t-ampm').value;
 		const startHour = startAmpm === 'PM'
 			? (startHour12 % 12) + 12
@@ -203,12 +203,12 @@ async function saveSchedule() {
 
 		const stopPicker = card.querySelector('.time-picker[data-type="stop"]');
 		const stopHour12 = parseInt(stopPicker.querySelector('.t-hour').value);
-		const stopMin  = parseInt(stopPicker.querySelector('.t-minute').value);
+		const stopMin = parseInt(stopPicker.querySelector('.t-minute').value);
 		const stopAmpm = stopPicker.querySelector('.t-ampm').value;
 		const stopHour = stopAmpm === 'PM'
 			? (stopHour12 % 12) + 12
 			: stopHour12 % 12;
-		payload.zones.push({id, days, startHour, startMin, stopHour, stopMin});
+		payload.zones.push({ id, days, startHour, startMin, stopHour, stopMin });
 	});
 
 	await fetch('/api/schedule/save', {
@@ -259,7 +259,7 @@ async function init() {
 			const zoneId = parseInt(btn.dataset.zone);
 			const state = zoneState[zoneId];
 			const card = document.querySelector(`.zone-card[data-zone="${zoneId}"]`);
-		
+
 			if (state.mode === 'idle') {
 				if (graceEnabled) {
 					state.mode = 'grace';
