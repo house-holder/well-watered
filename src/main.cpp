@@ -710,6 +710,7 @@ void initAPIRouting() {
 				}
 			}
 			saveSchedule();
+			logger("schedule modified, save.json updated");
 		}
 	);
 
