@@ -2,30 +2,31 @@
 #include "freertos/portmacro.h"
 #include <WiFi.h>
 #include <time.h>
+#include <vector>
 #include <stdarg.h>
 #include <Arduino.h>
 #include <ESPmDNS.h>
+#include <algorithm>
 #include <LittleFS.h>
 #include <driver/gpio.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 
-// forward declarations
 void logger(const char* fmt, ...);
 
 AsyncWebServer server(80);
+
+using Vector = std::vector<String>;
 using Req = AsyncWebServerRequest;
 
+const int DC_OK = 4;
 const char* ZONE_ENABLE  = "^\\/api\\/zones\\/(\\d+)\\/enable$";
 const char* ZONE_DISABLE = "^\\/api\\/zones\\/(\\d+)\\/disable$";
 const char* ZONE_PAUSE  = "^\\/api\\/zones\\/(\\d+)\\/pause$";
 const char* ZONE_RESUME = "^\\/api\\/zones\\/(\\d+)\\/resume$";
 
-const int DC_OK = 4;
-
 bool syncOkNTP = false;
-
 bool pwrOk24V() {
 	return digitalRead(DC_OK) == LOW;
 }
@@ -617,6 +618,81 @@ void initAPIRouting() {
 		if (f) f.close();
 		r->send(200, "application/json", "{\"ok\":true}");
 		logger("Log cleared: %s", LOG_FILES[idx]);
+	});
+
+	server.on("^\\/api\\/logs\\/last\\/(\\d+)$", HTTP_GET, [](Req *r) {
+		int count = r->pathArg(0).toInt();
+		count = max(1, min(count, 10000));
+		
+		File f = LittleFS.open(LOG_FILES[logActive], "r");
+		if (!f) {
+			r->send(200, "text/plain", "");
+			return;
+		}
+		String content = f.readString();
+		f.close();
+		
+		Vector lines;
+		int start = 0;
+		for (int i = 0; i <= content.length(); i++) {
+			if (i == content.length() || content[i] == '\n') {
+				if (i > start) {
+					lines.push_back(content.substring(start, i));
+				}
+				start = i + 1;
+			}
+		}
+		
+		String result;
+		int begin = max(0, (int)lines.size() - count);
+		for (int i = lines.size() - 1; i >= begin; i--) {
+			result += lines[i] + "\n";
+		}
+		
+		r->send(200, "text/plain", result);
+	});
+
+	server.on("^\\/api\\/logs\\/full$", HTTP_GET, [](Req *r) {
+		Vector allLines;
+		
+		File f = LittleFS.open(LOG_FILES[logActive], "r");
+		if (f) {
+			String content = f.readString();
+			f.close();
+			
+			int start = 0;
+			for (int i = 0; i <= content.length(); i++) {
+				if (i == content.length() || content[i] == '\n') {
+					if (i > start) {
+						allLines.push_back(content.substring(start, i));
+					}
+					start = i + 1;
+				}
+			}
+		}
+		
+		f = LittleFS.open(LOG_FILES[1 - logActive], "r");
+		if (f) {
+			String content = f.readString();
+			f.close();
+			
+			int start = 0;
+			for (int i = 0; i <= content.length(); i++) {
+				if (i == content.length() || content[i] == '\n') {
+					if (i > start) {
+						allLines.push_back(content.substring(start, i));
+					}
+					start = i + 1;
+				}
+			}
+		}
+		std::reverse(allLines.begin(), allLines.end());
+		String result;
+		for (const auto& line : allLines) {
+			result += line + "\n";
+		}
+		
+		r->send(200, "text/plain", result);
 	});
 
 	server.on("/api/schedule", HTTP_GET, [](Req *r) {
