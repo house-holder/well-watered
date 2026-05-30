@@ -520,6 +520,14 @@ void initPins() {
 
 void initWifi() {
 	Serial.printf("Connecting to network...");
+	IPAddress local(10, 0, 0, 20);
+	IPAddress gateway(10, 0, 0, 1);
+	IPAddress subnet(255, 255, 255, 0);
+	IPAddress dns(10, 0, 0, 1);
+
+	if (!WiFi.config(local, gateway, subnet, dns)) {
+		logger("WiFi.config failed, falling back to DHCP");
+	}
 	WiFi.begin(WNET, WKEY);
 	unsigned long timer = 0;
 	while (WiFi.status() != WL_CONNECTED) {
@@ -535,20 +543,26 @@ void initWifi() {
 
 void initNTP(tm &timeinfo) {
 	Serial.printf("Syncing with timeserver...");
-	unsigned long timer = 0;
-	const long GMT_OFFSET = -6 * 3600;
-	const int DST_OFFSET  = 3600;
 
+	unsigned long timer = 0;
+	unsigned long start = millis();
+	const int DST_OFFSET  = 3600;
+	const long GMT_OFFSET = -6 * 3600;
+	const unsigned long NTP_TIMEOUT = 15000;
 	configTime(GMT_OFFSET, DST_OFFSET, "pool.ntp.org");
 
 	while (!getLocalTime(&timeinfo)) {
+		if (millis() - start >= NTP_TIMEOUT) {
+			Serial.println(" timed out, continuing without sync");
+			syncOkNTP = false;
+			return;
+		}
 		unsigned long now = millis();
 		if (now - timer >= 100) {
 			Serial.print(".");
 			timer = now;
 		}
 	}
-
 	Serial.println(&timeinfo, " synced, time now: %H:%M:%S");
 	syncOkNTP = true;
 }
@@ -588,6 +602,14 @@ void initAPIRouting() {
 
 	server.on("/wtr.ico", HTTP_GET, [](Req *r) {
 		r->send(LittleFS, "/wtr.ico", "image/x-icon");
+	});
+
+	server.on("/admin", HTTP_GET, [](Req *r) {
+		r->send(LittleFS, "/admin.html", "text/html");
+	});
+
+	server.on("/admin.js", HTTP_GET, [](Req *r) {
+		r->send(LittleFS, "/admin.js", "text/javascript");
 	});
 
 	// Basic webapp utils -----------------------------------------------------
@@ -793,6 +815,37 @@ void initAPIRouting() {
 	);
 
 	// Device administration --------------------------------------------------
+	server.on("/api/resources", HTTP_GET, [](Req *r) {
+		float total    = ESP.getHeapSize()     / 1024.0f;
+		float freeHeap = ESP.getFreeHeap()     / 1024.0f;
+		float minFree  = ESP.getMinFreeHeap()  / 1024.0f;
+		float maxBlk   = ESP.getMaxAllocHeap() / 1024.0f;
+		float used     = total - freeHeap;
+		float peak     = total - minFree;
+
+		unsigned long upSec = millis() / 1000;
+		unsigned long upMin = upSec / 60;
+		unsigned long upHr  = upMin / 60;
+
+		JsonDocument doc;
+		JsonObject heap = doc["heap"].to<JsonObject>();
+		heap["used"]     = used;
+		heap["total"]    = total;
+		heap["peak"]     = peak;
+		heap["free"]     = freeHeap;
+		heap["maxBlock"] = maxBlk;
+		JsonObject uptime = doc["uptime"].to<JsonObject>();
+		uptime["hours"]   = (int)upHr;
+		uptime["minutes"] = (int)(upMin % 60);
+		uptime["seconds"] = (int)(upSec % 60);
+		JsonObject fs = doc["fs"].to<JsonObject>();
+		fs["used"]  = LittleFS.usedBytes()  / 1024.0f;
+		fs["total"] = LittleFS.totalBytes() / 1024.0f;
+		String out;
+		serializeJson(doc, out);
+		r->send(200, "application/json", out);
+	});
+
 	server.on("/api/fs", HTTP_GET, [](Req *r) {
 		JsonDocument doc;
 		JsonArray files = doc["files"].to<JsonArray>();
