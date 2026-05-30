@@ -605,7 +605,6 @@ void initAPIRouting() {
 				}
 			}
 			saveSchedule();
-			logger("Schedule saved");
 		}
 	);
 
