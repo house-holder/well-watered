@@ -21,6 +21,10 @@ using Vector = std::vector<String>;
 using Req = AsyncWebServerRequest;
 
 const int DC_OK = 4;
+
+const char* LOG_FILES[2]     = { "/log0.txt", "/log1.txt" };
+const size_t LOG_CUTOFF = 25600; //25KiB
+
 const char* ZONE_ENABLE  = "^\\/api\\/zones\\/(\\d+)\\/enable$";
 const char* ZONE_DISABLE = "^\\/api\\/zones\\/(\\d+)\\/disable$";
 const char* ZONE_PAUSE  = "^\\/api\\/zones\\/(\\d+)\\/pause$";
@@ -302,91 +306,6 @@ void loadSchedule() {
 	}
 }
 
-const char* timestamp() {
-	static char buf[24];
-	struct tm t;
-	getLocalTime(&t);
-	strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &t);
-	return buf;
-}
-
-const char* LOG_FILES[2]     = { "/log0.txt", "/log1.txt" };
-const size_t LOG_SOFT_CUTOFF = 50 * 1024; // 50KiB
-const size_t LOG_HARD_MAX    = 150 * 1024;
-
-Preferences logPrefs;
-SemaphoreHandle_t logMutex = nullptr;
-uint8_t logActive = 0;
-
-size_t fileSize(const char* path) {
-	File f = LittleFS.open(path, "r");
-	size_t s = f ? f.size() : 0;
-	if (f) f.close();
-	return s;
-}
-
-void initLog() {
-	logMutex = xSemaphoreCreateMutex();
-	logPrefs.begin("log", false);
-	logActive = logPrefs.getUChar("active", 0);
-	if (logActive > 1) logActive = 0;
-
-	for (int i = 0; i < 2; i++) {
-		if (!LittleFS.exists(LOG_FILES[i])) {
-			File f = LittleFS.open(LOG_FILES[i], "w");
-			if (f) f.close();
-		}
-	}
-	logger("Log ready: active=%s", LOG_FILES[logActive]);
-}
-
-void appendLog(const char* line) {
-	if (!logMutex) return;
-	xSemaphoreTake(logMutex, portMAX_DELAY);
-
-	const char* active = LOG_FILES[logActive];
-	File f = LittleFS.open(active, "a");
-	if (f) {
-		f.print(line);
-		f.print('\n');
-		f.close();
-	}
-
-	size_t activeSize = fileSize(active);
-	if (activeSize >= LOG_SOFT_CUTOFF) {
-		const char* inactive = LOG_FILES[1 - logActive];
-		size_t inactiveSize  = fileSize(inactive);
-
-		if (inactiveSize == 0) {
-			logActive = 1 - logActive;
-			logPrefs.putUChar("active", logActive);
-			Serial.printf("LOG ROTATE -> active=%s\n", LOG_FILES[logActive]);
-		} else if (activeSize >= LOG_HARD_MAX) {
-			File z = LittleFS.open(inactive, "w");
-			if (z) z.close();
-			logActive = 1 - logActive;
-			logPrefs.putUChar("active", logActive);
-			Serial.printf("LOG DROP (Pi behind) -> dropped %s, active=%s\n",
-				inactive, LOG_FILES[logActive]);
-		}
-	}
-
-	xSemaphoreGive(logMutex);
-}
-
-void logger(const char* fmt, ...) {
-	char buf[128];
-	va_list args;
-	va_start(args, fmt);
-	vsnprintf(buf, sizeof(buf), fmt, args);
-	va_end(args);
-
-	char line[160];
-	snprintf(line, sizeof(line), "%s %s", timestamp(), buf);
-	Serial.println(line);
-	appendLog(line);
-}
-
 
 // FreeRTOS Tasks -------------------------------------------------------------
 void ledTask(void*) {
@@ -456,8 +375,82 @@ void scheduleTask(void*) {
 	}
 }
 
+// Log handling ---------------------------------------------------------------
+const char* timestamp() {
+	static char buf[24];
+	struct tm t;
+	getLocalTime(&t);
+	strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &t);
+	return buf;
+}
+
+Preferences logPrefs;
+SemaphoreHandle_t logMutex = nullptr;
+uint8_t logActive = 0;
+
+size_t fileSize(const char* path) {
+	File f = LittleFS.open(path, "r");
+	size_t s = f ? f.size() : 0;
+	if (f) f.close();
+	return s;
+}
+
+void initLog() {
+	logMutex = xSemaphoreCreateMutex();
+	logPrefs.begin("log", false);
+	logActive = logPrefs.getUChar("active", 0);
+	if (logActive > 1) logActive = 0;
+
+	for (int i = 0; i < 2; i++) {
+		if (!LittleFS.exists(LOG_FILES[i])) {
+			File f = LittleFS.open(LOG_FILES[i], "w");
+			if (f) f.close();
+		}
+	}
+	logger("Log ready: active=%s", LOG_FILES[logActive]);
+}
+
+void appendLog(const char* line) {
+	if (!logMutex) return;
+	xSemaphoreTake(logMutex, portMAX_DELAY);
+
+	const char* active = LOG_FILES[logActive];
+	File f = LittleFS.open(active, "a");
+	if (f) {
+		f.print(line);
+		f.print('\n');
+		f.close();
+	}
+
+size_t activeSize = fileSize(active);
+	if (activeSize >= LOG_CUTOFF) {
+		int nextActive = 1 - logActive;
+		File z = LittleFS.open(LOG_FILES[nextActive], "w");
+		if (z) z.close();
+		logActive = nextActive;
+		logPrefs.putUChar("active", logActive);
+		Serial.printf("LOG ROTATE -> cleared %s, active=%s\n",
+			LOG_FILES[nextActive], LOG_FILES[logActive]);
+	}
+
+	xSemaphoreGive(logMutex);
+}
+
+void logger(const char* fmt, ...) {
+	char buf[128];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
+
+	char line[160];
+	snprintf(line, sizeof(line), "%s %s", timestamp(), buf);
+	Serial.println(line);
+	appendLog(line);
+}
+
 // Serial commands ------------------------------------------------------------
-void cmdRSC() {
+void cmdResourceMonitor() {
     float total    = ESP.getHeapSize()     / 1024.0f;
     float freeHeap = ESP.getFreeHeap()     / 1024.0f;
     float minFree  = ESP.getMinFreeHeap()  / 1024.0f;
@@ -486,12 +479,26 @@ void cmdRSC() {
 		fsUsed, fsTotal, (fsUsed / fsTotal) * 100);
 }
 
+void cmdLogTest() {
+	logger("Starting synthetic fill test...");
+	for (int i = 0; i < 300; i++) {
+		char line[64];
+		snprintf(line, sizeof(line), "synth line %d, pad to target size", i);
+		logger(line);
+		vTaskDelay(10 / portTICK_PERIOD_MS);
+	}
+	logger("logtest complete: 300 lines");
+}
+
 void commandListener() {
 	if (Serial.available()) {
 		String cmd = Serial.readStringUntil('\n');
 		cmd.trim();
 		if (cmd == "rsc") {
-			cmdRSC();
+			cmdResourceMonitor();
+		}
+		if (cmd == "lt") {
+			cmdLogTest();
 		}
 	}
 }
@@ -622,38 +629,9 @@ void initAPIRouting() {
 
 	server.on("^\\/api\\/logs\\/last\\/(\\d+)$", HTTP_GET, [](Req *r) {
 		int count = r->pathArg(0).toInt();
-		count = max(1, min(count, 10000));
+		count = max(1, min(count, 200));
 		
-		File f = LittleFS.open(LOG_FILES[logActive], "r");
-		if (!f) {
-			r->send(200, "text/plain", "");
-			return;
-		}
-		String content = f.readString();
-		f.close();
-		
-		Vector lines;
-		int start = 0;
-		for (int i = 0; i <= content.length(); i++) {
-			if (i == content.length() || content[i] == '\n') {
-				if (i > start) {
-					lines.push_back(content.substring(start, i));
-				}
-				start = i + 1;
-			}
-		}
-		
-		String result;
-		int begin = max(0, (int)lines.size() - count);
-		for (int i = lines.size() - 1; i >= begin; i--) {
-			result += lines[i] + "\n";
-		}
-		
-		r->send(200, "text/plain", result);
-	});
-
-	server.on("^\\/api\\/logs\\/full$", HTTP_GET, [](Req *r) {
-		Vector allLines;
+		Vector activeLines;
 		
 		File f = LittleFS.open(LOG_FILES[logActive], "r");
 		if (f) {
@@ -664,12 +642,26 @@ void initAPIRouting() {
 			for (int i = 0; i <= content.length(); i++) {
 				if (i == content.length() || content[i] == '\n') {
 					if (i > start) {
-						allLines.push_back(content.substring(start, i));
+						activeLines.push_back(content.substring(start, i));
 					}
 					start = i + 1;
 				}
 			}
 		}
+		
+		// if active file has enough, serve from it alone
+		if ((int)activeLines.size() >= count) {
+			String result;
+			int begin = (int)activeLines.size() - count;
+			for (int i = begin; i < (int)activeLines.size(); i++) {
+				result += activeLines[i] + "\n";
+			}
+			r->send(200, "text/plain", result);
+			return;
+		}
+		
+		// need more: read inactive (older), then append active (newer)
+		Vector combined;
 		
 		f = LittleFS.open(LOG_FILES[1 - logActive], "r");
 		if (f) {
@@ -680,16 +672,26 @@ void initAPIRouting() {
 			for (int i = 0; i <= content.length(); i++) {
 				if (i == content.length() || content[i] == '\n') {
 					if (i > start) {
-						allLines.push_back(content.substring(start, i));
+						combined.push_back(content.substring(start, i));
 					}
 					start = i + 1;
 				}
 			}
 		}
-		std::reverse(allLines.begin(), allLines.end());
+		
+		for (const auto& line : activeLines) {
+			combined.push_back(line);
+		}
+		
 		String result;
-		for (const auto& line : allLines) {
-			result += line + "\n";
+		if ((int)combined.size() < count) {
+			result += "[[[ note: only " + String(combined.size()) +
+				" lines available (requested " + String(count) + ") ]]]\n";
+		}
+		
+		int begin = max(0, (int)combined.size() - count);
+		for (int i = begin; i < (int)combined.size(); i++) {
+			result += combined[i] + "\n";
 		}
 		
 		r->send(200, "text/plain", result);
