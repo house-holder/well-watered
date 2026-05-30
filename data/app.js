@@ -6,6 +6,22 @@ const zoneState = [ // countdown grace period to enable
 
 const graceEnabled = false;
 const graceCountdown = 5;
+let saveTimer = null;
+
+function debounceScheduleSave() {
+	clearTimeout(saveTimer);
+	saveTimer = setTimeout(() => {
+		saveTimer = null;
+		saveSchedule();
+	}, 8000);
+}
+
+function flushScheduleSave() {
+	if (saveTimer === null) return;   // nothing pending
+	clearTimeout(saveTimer);
+	saveTimer = null;
+	saveSchedule();
+}
 
 // setup functions ------------------------------------------------------------
 function updateClock() {
@@ -338,12 +354,12 @@ async function init() {
 		card.querySelectorAll('.day').forEach(btn => {
 			btn.addEventListener('click', () => {
 				btn.classList.toggle('active');
-				saveSchedule();
+				debounceScheduleSave();
 			});
 		});
 
 		card.querySelectorAll('.t-hour, .t-minute, .t-ampm').forEach(select => {
-			select.addEventListener('change', () => saveSchedule());
+			select.addEventListener('change', () => debounceScheduleSave());
 		});
 
 		card.querySelector('.minus').addEventListener('click', () => {
@@ -371,8 +387,12 @@ async function init() {
 document.addEventListener('visibilitychange', () => {
 	if (document.visibilityState === 'visible') {
 		fetchState().then(applyState);
+	} else {
+		flushScheduleSave();
 	}
 });
+
+window.addEventListener('pagehide', flushScheduleSave)
 
 init();
 updateClock();
