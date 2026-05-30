@@ -394,6 +394,13 @@ document.addEventListener('visibilitychange', () => {
 
 window.addEventListener('pagehide', flushScheduleSave)
 
+const clockMenu = document.getElementById('clock-menu');
+document.getElementById('clock-wrap').addEventListener('click', (e) => {
+	e.stopPropagation();
+	clockMenu.hidden = !clockMenu.hidden;
+});
+document.addEventListener('click', () => { clockMenu.hidden = true; });
+
 init();
 updateClock();
 setInterval(updateClock, 1000);

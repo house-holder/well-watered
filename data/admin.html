@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta
+		charset="UTF-8"
+		name="viewport"
+		content="width=device-width, initial-scale=1"
+	>
+
+	<title>Admin — Well-Watered</title>
+
+	<link rel="icon" href="/wtr.ico" type="image/x-icon">
+	<link rel="stylesheet" href="style.css">
+	<script src="admin.js" defer></script>
+	<style>
+		body {
+			max-width: 860px;
+			background: #141414;
+			color: #e0e0e0;
+		}
+
+		h1 { color: #4a7c59; }
+		h2 { color: #e0e0e0; }
+
+		.zone-card {
+			background: #1e1f21;
+			box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+		}
+
+		.back-link {
+			color: #c8973a;
+			font-weight: 600;
+			font-size: 0.95rem;
+			text-decoration: none;
+			white-space: nowrap;
+		}
+
+		.section-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin-bottom: 1rem;
+		}
+		.section-header h2 { margin: 0; }
+
+		.section-controls {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+		}
+
+		.auto-label {
+			display: flex;
+			align-items: center;
+			gap: 0.3rem;
+			font-size: 0.85rem;
+			color: #666;
+			cursor: pointer;
+			white-space: nowrap;
+		}
+
+		.btn-sm {
+			padding: 0.35rem 0.75rem;
+			border: none;
+			border-radius: 6px;
+			background: #2e2f31;
+			color: #c8c8c8;
+			font-size: 0.82rem;
+			font-weight: 600;
+			cursor: pointer;
+		}
+		.btn-sm:hover { background: #3a3b3d; }
+
+		select.btn-sm {
+			-webkit-appearance: auto;
+			appearance: auto;
+			min-height: unset;
+			text-align: left;
+		}
+
+		.btn-danger {
+			padding: 0.3rem 0.65rem;
+			border: none;
+			border-radius: 6px;
+			background: #4a1515;
+			color: #e08080;
+			font-size: 0.8rem;
+			font-weight: 600;
+			cursor: pointer;
+		}
+		.btn-danger:hover { background: #5c1c1c; }
+
+		/* Resource grid */
+		.res-grid {
+			display: flex;
+			flex-direction: column;
+			gap: 0.5rem;
+		}
+
+		.res-card {
+			background: #272829;
+			border-radius: 8px;
+			padding: 0.6rem 0.75rem;
+		}
+
+		.res-row {
+			display: flex;
+			justify-content: space-between;
+			align-items: baseline;
+			gap: 1rem;
+			margin-bottom: 0.35rem;
+		}
+
+		.res-label {
+			font-size: 0.72rem;
+			color: #777;
+			text-transform: uppercase;
+			letter-spacing: 0.06em;
+		}
+
+		.res-value {
+			font-size: 0.88rem;
+			font-weight: 600;
+			color: #e0e0e0;
+		}
+
+		.res-bar {
+			height: 4px;
+			background: #333;
+			border-radius: 3px;
+			overflow: hidden;
+		}
+
+		.res-bar-fill {
+			height: 100%;
+			background: #4a7c59;
+			border-radius: 3px;
+			width: 0%;
+			transition: width 0.3s;
+		}
+
+		.res-trio {
+			display: flex;
+			padding: 0.35rem 0;
+		}
+
+		.res-trio-item {
+			flex: 1;
+			padding: 0 0.75rem;
+			border-right: 1px solid #333;
+		}
+		.res-trio-item:first-child { padding-left: 0.75rem; }
+		.res-trio-item:last-child { border-right: none; }
+		.res-trio-item .res-value { font-size: 0.82rem; }
+		.res-trio-item .res-label { margin-bottom: 0.15rem; display: block; }
+
+		/* Log output */
+		#log-output {
+			font-family: monospace;
+			font-size: 0.6rem;
+			line-height: 1.45;
+			background: #0d0d0d;
+			color: #d4d4d4;
+			padding: 0.75rem;
+			border-radius: 8px;
+			max-height: 380px;
+			overflow-y: auto;
+			white-space: pre-wrap;
+			word-break: break-all;
+			margin-top: 0.75rem;
+		}
+
+		/* File rows */
+		.file-row {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			padding: 0.4rem 0;
+			border-bottom: 1px solid #2a2b2d;
+		}
+		.file-row:last-child { border-bottom: none; }
+
+		.file-name {
+			flex: 1;
+			font-family: monospace;
+			font-size: 0.88rem;
+			color: #c8c8c8;
+		}
+
+		.file-size {
+			min-width: 5rem;
+			text-align: right;
+			font-size: 0.82rem;
+			color: #666;
+		}
+
+		.badge-active {
+			font-size: 0.7rem;
+			font-weight: 700;
+			padding: 0.2rem 0.5rem;
+			border-radius: 99px;
+			background: #4a7c59;
+			color: white;
+			letter-spacing: 0.04em;
+		}
+
+		#fs-file-count {
+			font-size: 0.85rem;
+			color: #666;
+		}
+	</style>
+</head>
+
+<body>
+	<header>
+		<h1>Admin Panel</h1>
+		<a href="/" class="back-link">← Back</a>
+	</header>
+
+	<main>
+
+		<section class="zone-card">
+			<div class="section-header">
+				<h2>Resources</h2>
+				<div class="section-controls">
+					<label class="auto-label">
+						<input type="checkbox" id="res-auto" checked> Auto
+					</label>
+					<button class="btn-sm" id="res-refresh">Refresh</button>
+				</div>
+			</div>
+			<div class="res-grid">
+				<div class="res-card">
+					<div class="res-row">
+						<span class="res-label">Heap Used</span>
+						<span class="res-value" id="res-heap-val">—</span>
+					</div>
+					<div class="res-bar"><div class="res-bar-fill" id="res-heap-bar"></div></div>
+				</div>
+				<div class="res-card">
+					<div class="res-row">
+						<span class="res-label">Filesystem</span>
+						<span class="res-value" id="res-fs-val">—</span>
+					</div>
+					<div class="res-bar"><div class="res-bar-fill" id="res-fs-bar"></div></div>
+				</div>
+				<div class="res-card res-trio">
+					<div class="res-trio-item">
+						<span class="res-label">Peak Heap</span>
+						<div class="res-value" id="res-peak-val">—</div>
+					</div>
+					<div class="res-trio-item">
+						<span class="res-label">Max Block</span>
+						<div class="res-value" id="res-block-val">—</div>
+					</div>
+					<div class="res-trio-item">
+						<span class="res-label">Uptime</span>
+						<div class="res-value" id="res-uptime-val">—</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<section class="zone-card">
+			<div class="section-header">
+				<h2>Log Viewer</h2>
+				<div class="section-controls">
+					<select class="btn-sm" id="log-count">
+						<option value="10">10 lines</option>
+						<option value="25" selected>25 lines</option>
+						<option value="50">50 lines</option>
+						<option value="100">100 lines</option>
+						<option value="200">200 lines</option>
+					</select>
+					<label class="auto-label">
+						<input type="checkbox" id="log-auto" checked> Auto
+					</label>
+					<button class="btn-sm" id="log-refresh">Refresh</button>
+				</div>
+			</div>
+			<pre id="log-output">Loading…</pre>
+		</section>
+
+		<section class="zone-card">
+			<div class="section-header">
+				<h2>Filesystem</h2>
+				<div class="section-controls">
+					<span id="fs-file-count"></span>
+					<button class="btn-sm" id="fs-refresh">Refresh</button>
+				</div>
+			</div>
+			<div id="fs-list"></div>
+		</section>
+
+	</main>
+</body>
+</html>
