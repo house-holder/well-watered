@@ -1,4 +1,5 @@
 #include "esp32-hal-gpio.h"
+#include "freertos/portmacro.h"
 #include <WiFi.h>
 #include <time.h>
 #include <stdarg.h>
@@ -6,8 +7,12 @@
 #include <ESPmDNS.h>
 #include <LittleFS.h>
 #include <driver/gpio.h>
+#include <Preferences.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
+
+// forward declarations
+void logger(const char* fmt, ...);
 
 AsyncWebServer server(80);
 using Req = AsyncWebServerRequest;
@@ -297,11 +302,75 @@ void loadSchedule() {
 }
 
 const char* timestamp() {
-	static char buf[16];
+	static char buf[24];
 	struct tm t;
 	getLocalTime(&t);
-	strftime(buf, sizeof(buf), "%m-%d %H:%M:%S", &t);
+	strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &t);
 	return buf;
+}
+
+const char* LOG_FILES[2]     = { "/log0.txt", "/log1.txt" };
+const size_t LOG_SOFT_CUTOFF = 50 * 1024; // 50KiB
+const size_t LOG_HARD_MAX    = 150 * 1024;
+
+Preferences logPrefs;
+SemaphoreHandle_t logMutex = nullptr;
+uint8_t logActive = 0;
+
+size_t fileSize(const char* path) {
+	File f = LittleFS.open(path, "r");
+	size_t s = f ? f.size() : 0;
+	if (f) f.close();
+	return s;
+}
+
+void initLog() {
+	logMutex = xSemaphoreCreateMutex();
+	logPrefs.begin("log", false);
+	logActive = logPrefs.getUChar("active", 0);
+	if (logActive > 1) logActive = 0;
+
+	for (int i = 0; i < 2; i++) {
+		if (!LittleFS.exists(LOG_FILES[i])) {
+			File f = LittleFS.open(LOG_FILES[i], "w");
+			if (f) f.close();
+		}
+	}
+	logger("Log ready: active=%s", LOG_FILES[logActive]);
+}
+
+void appendLog(const char* line) {
+	if (!logMutex) return;
+	xSemaphoreTake(logMutex, portMAX_DELAY);
+
+	const char* active = LOG_FILES[logActive];
+	File f = LittleFS.open(active, "a");
+	if (f) {
+		f.print(line);
+		f.print('\n');
+		f.close();
+	}
+
+	size_t activeSize = fileSize(active);
+	if (activeSize >= LOG_SOFT_CUTOFF) {
+		const char* inactive = LOG_FILES[1 - logActive];
+		size_t inactiveSize  = fileSize(inactive);
+
+		if (inactiveSize == 0) {
+			logActive = 1 - logActive;
+			logPrefs.putUChar("active", logActive);
+			Serial.printf("LOG ROTATE -> active=%s\n", LOG_FILES[logActive]);
+		} else if (activeSize >= LOG_HARD_MAX) {
+			File z = LittleFS.open(inactive, "w");
+			if (z) z.close();
+			logActive = 1 - logActive;
+			logPrefs.putUChar("active", logActive);
+			Serial.printf("LOG DROP (Pi behind) -> dropped %s, active=%s\n",
+				inactive, LOG_FILES[logActive]);
+		}
+	}
+
+	xSemaphoreGive(logMutex);
 }
 
 void logger(const char* fmt, ...) {
@@ -310,7 +379,11 @@ void logger(const char* fmt, ...) {
 	va_start(args, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
-	Serial.printf("%s %s\n", timestamp(), buf);
+
+	char line[160];
+	snprintf(line, sizeof(line), "%s %s", timestamp(), buf);
+	Serial.println(line);
+	appendLog(line);
 }
 
 
@@ -320,7 +393,6 @@ void ledTask(void*) {
 		Ok.tick();
 		Warn.tick();
 		for (int i = 0; i < 3; i++) {
-			// could do a check for problems and flash light if any exist?
 			zones[i].LED.mode = zones[i].isRunning() ? ON : OFF;
 			zones[i].LED.tick();
 		}
@@ -392,7 +464,7 @@ void cmdRSC() {
     float used     = total - freeHeap;
     float peak     = total - minFree;
 
-    logger("[RESOURCE MONITOR]");
+    Serial.println("[RESOURCE MONITOR]");
     Serial.printf("  Heap:     %.1f / %.1f KiB (%.1f%%)\n",
 			used, total, (used/total)*100);
     Serial.printf("  Peak:     %.1f KiB used\n", peak);
@@ -485,6 +557,7 @@ void initLittleFS() {
 		return;
 	}	
 	logger("LittleFS mounted");
+	initLog();
 	if (!LittleFS.exists("/save.json")) {
 		saveSchedule();
 		logger("/save.json initialized with defaults");
@@ -512,6 +585,38 @@ void initAPIRouting() {
 	// Basic webapp utils -----------------------------------------------------
 	server.on("/api/state", HTTP_GET, [](Req *r) {
 		r->send(200, "application/json", getStateJSON());
+	});
+
+	server.on("/api/logs/state", HTTP_GET, [](Req *r) {
+		JsonDocument doc;
+		doc["active"]   = logActive;
+		doc["inactive"] = 1 - logActive;
+		doc["files"][0]["name"] = LOG_FILES[0];
+		doc["files"][0]["size"] = fileSize(LOG_FILES[0]);
+		doc["files"][1]["name"] = LOG_FILES[1];
+		doc["files"][1]["size"] = fileSize(LOG_FILES[1]);
+		String out;
+		serializeJson(doc, out);
+		r->send(200, "application/json", out);
+	});
+
+	server.on("^\\/api\\/logs\\/file\\/([01])$", HTTP_GET, [](Req *r) {
+		int idx = r->pathArg(0).toInt();
+		r->send(LittleFS, LOG_FILES[idx], "text/plain");
+	});
+
+	server.on("^\\/api\\/logs\\/delete\\/([01])$", HTTP_POST, [](Req *r) {
+		int idx = r->pathArg(0).toInt();
+		if (idx == logActive) {
+			r->send(409, "application/json",
+				"{\"error\":\"refusing to clear active log\"}");
+			logger("Log delete REJECTED: %s is active", LOG_FILES[idx]);
+			return;
+		}
+		File f = LittleFS.open(LOG_FILES[idx], "w");
+		if (f) f.close();
+		r->send(200, "application/json", "{\"ok\":true}");
+		logger("Log cleared: %s", LOG_FILES[idx]);
 	});
 
 	server.on("/api/schedule", HTTP_GET, [](Req *r) {
@@ -661,10 +766,10 @@ void setup() {
 	server.begin();
 
 	logger("Webserver running on %s", WiFi.localIP().toString().c_str());
-	xTaskCreate(powerMonitorTask, "PWR", 2048, nullptr, 1, nullptr);
+	xTaskCreate(powerMonitorTask, "PWR", 4096, nullptr, 1, nullptr);
 	float startup = static_cast<float>(millis()) / 1000;
 	logger("Boot sequence took %.1f seconds", startup);
-	xTaskCreate(scheduleTask, "Schedule", 2048, nullptr, 1, nullptr);
+	xTaskCreate(scheduleTask, "Schedule", 4096, nullptr, 1, nullptr);
 
 	Ok.on();
 	Warn.off();
@@ -672,4 +777,5 @@ void setup() {
 
 void loop() {
 	commandListener();
+	vTaskDelay(10 / portTICK_PERIOD_MS);
 }
