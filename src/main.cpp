@@ -348,7 +348,7 @@ void scheduleTask(void*) {
 
                 if (zones[i].isPaused() && now >= zones[i].pausedUntil) {
                     zones[i].pausedUntil = 0;
-                    logger("%s pause expired", zones[i].name);
+                    logger("%s off (pause expired)", zones[i].name);
                 }
 
                 bool shouldRun = zoneShouldBeActive(zones[i], t);
