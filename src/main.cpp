@@ -5,7 +5,6 @@
 #include <vector>
 #include <stdarg.h>
 #include <Arduino.h>
-#include <ESPmDNS.h>
 #include <algorithm>
 #include <LittleFS.h>
 #include <driver/gpio.h>
@@ -23,7 +22,7 @@ using Req = AsyncWebServerRequest;
 const int DC_OK = 4;
 
 const char* LOG_FILES[2]     = { "/log0.txt", "/log1.txt" };
-const size_t LOG_CUTOFF = 25600; //25KiB
+const size_t LOG_CUTOFF = 25600; //bytes = 25KiB
 
 const char* ZONE_ENABLE  = "^\\/api\\/zones\\/(\\d+)\\/enable$";
 const char* ZONE_DISABLE = "^\\/api\\/zones\\/(\\d+)\\/disable$";
@@ -326,11 +325,11 @@ void powerMonitorTask(void*) {
         bool currentState = pwrOk24V();
         if (currentState != lastState) {
             if (currentState) {
-                logger("[24V OK]");
+                logger("[ 24V OK ]");
                 Ok.on();
                 Warn.off();
             } else {
-                logger("! [24V FAULT]");
+                logger("!!! 24V FAULT !!!");
                 Ok.flash();
                 Warn.flash();
             }
@@ -356,10 +355,10 @@ void scheduleTask(void*) {
 
 				if (shouldRun && zones[i].mode == IDLE && !zones[i].isPaused()) {
 					zones[i].scheduleStart();
-					logger("RUN: %s", zones[i].name);
+					logger("START: %s", zones[i].name);
 				} else if (!shouldRun && zones[i].mode == SCHD) {
 					zones[i].scheduleStop();
-					logger("RUN: %s", zones[i].name);
+					logger("STOP: %s", zones[i].name);
 				}
 
 				if (zones[i].isOverride()
@@ -407,7 +406,7 @@ void initLog() {
 			if (f) f.close();
 		}
 	}
-	logger("[log active: %s]", LOG_FILES[logActive]);
+	logger("[ log active: %s ]", LOG_FILES[logActive]);
 }
 
 void appendLog(const char* line) {
@@ -429,7 +428,7 @@ size_t activeSize = fileSize(active);
 		if (z) z.close();
 		logActive = nextActive;
 		logPrefs.putUChar("active", logActive);
-		logger("[rotate log: %s\n, clr=%s]",
+		logger("[ rotate log: %s\n, clr=%s ]",
 			LOG_FILES[logActive], LOG_FILES[nextActive]);
 	}
 
@@ -551,24 +550,17 @@ void initNTP(tm &timeinfo) {
 	syncOkNTP = true;
 }
 
-void initMDNS() {
-	if (MDNS.begin("watering")) {
-		logger("mDNS started: http://watering.local");
-	}
-}
-
-void initLittleFS() {
+void initFilesystem() {
 	if (!LittleFS.begin()) {
-		logger("! [mount fs FAILED]");
+		logger("!!! mount fs FAILED !!!");
 		return;
 	}	
-	logger("[mounted fs]");
+	logger("[ mounted fs ]");
 	initLog();
 	if (!LittleFS.exists("/save.json")) {
 		saveSchedule();
-		logger("[initialized default save.json]");
+		logger("[ initialized default save.json ]");
 	}
-    loadSchedule();
 }
 
 void initAPIRouting() {
@@ -596,7 +588,6 @@ void initAPIRouting() {
 		r->send(LittleFS, "/admin.js", "text/javascript");
 	});
 
-	// Basic webapp utils -----------------------------------------------------
 	server.on("/api/state", HTTP_GET, [](Req *r) {
 		r->send(200, "application/json", getStateJSON());
 	});
@@ -730,7 +721,7 @@ void initAPIRouting() {
 			deserializeJson(doc, data, len);
 			int duration = doc["duration"] | 120;
 			zones[id].enable(duration);
-			logger("%s ON, %dmin", zones[id].name, duration);
+			logger("%s on for %dmin", zones[id].name, duration);
 		}
 	);
 
@@ -742,7 +733,7 @@ void initAPIRouting() {
 		}
 		zones[id].disable();
 		r->send(200, "application/json", "{\"ok\":true}");
-		logger("%s OFF", zones[id].name);
+		logger("%s off", zones[id].name);
 	});
 
 	server.on(ZONE_PAUSE, HTTP_POST, [](Req *r) {
@@ -752,7 +743,7 @@ void initAPIRouting() {
 			return;
 		}
 		zones[id].pause();
-		logger("PAUSE %s exp=%02d:%02d",
+		logger("%s paused, expires %02d:%02d",
 			zones[id].name,
 			zones[id].schedule.stopHour,
 			zones[id].schedule.stopMin);
@@ -792,11 +783,10 @@ void initAPIRouting() {
 				}
 			}
 			saveSchedule();
-			logger("[schedule saved]");
+			logger("[ schedule saved ]");
 		}
 	);
 
-	// Device administration --------------------------------------------------
 	server.on("/api/resources", HTTP_GET, [](Req *r) {
 		float total    = ESP.getHeapSize()     / 1024.0f;
 		float freeHeap = ESP.getFreeHeap()     / 1024.0f;
@@ -858,11 +848,10 @@ void initAPIRouting() {
 		String filename = "/" + r->pathArg(0);
 		File f = LittleFS.open(filename, "w");
 		f.close();
-		logger("[cleared '%s']", filename.c_str());
+		logger("[ cleared '%s' ]", filename.c_str());
 		r->send(200, "application/json", "{\"ok\":true}");
 	});
 }
-
 
 // Main: setup & loop ---------------------------------------------------------
 void setup() {
@@ -873,22 +862,21 @@ void setup() {
 	initPins();
 	initWifi();
 	initNTP(timeinfo);
-	// initMDNS();
-	initLittleFS();
+	initFilesystem();
 	initAPIRouting();
-
 	server.begin();
 
-	xTaskCreate(powerMonitorTask, "PWR", 4096, nullptr, 1, nullptr);
-	xTaskCreate(scheduleTask, "Schedule", 4096, nullptr, 1, nullptr);
 	float startup = static_cast<float>(millis()) / 1000;
 
-	logger("[server running: %s]", WiFi.localIP().toString().c_str());
-	logger("[wifi strength: %ddBm]", WiFi.RSSI());
-	logger("[bootup time: %.1fs]", startup);
+	logger("[ server running: %s ]", WiFi.localIP().toString().c_str());
+	logger("[ wifi strength:  %ddBm ]", WiFi.RSSI());
+	logger("[ bootup time:    %.1fs ]", startup);
 
 	Ok.on();
 	Warn.off();
+
+	xTaskCreate(powerMonitorTask, "PWR", 4096, nullptr, 1, nullptr);
+	xTaskCreate(scheduleTask, "Schedule", 4096, nullptr, 1, nullptr);
 }
 
 void loop() {
