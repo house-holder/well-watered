@@ -326,11 +326,11 @@ void powerMonitorTask(void*) {
         bool currentState = pwrOk24V();
         if (currentState != lastState) {
             if (currentState) {
-                logger("24V OK");
+                logger("[24V OK]");
                 Ok.on();
                 Warn.off();
             } else {
-                logger("24V supply fault");
+                logger("! [24V FAULT]");
                 Ok.flash();
                 Warn.flash();
             }
@@ -356,10 +356,10 @@ void scheduleTask(void*) {
 
 				if (shouldRun && zones[i].mode == IDLE && !zones[i].isPaused()) {
 					zones[i].scheduleStart();
-					logger("Schedule: %s ON", zones[i].name);
+					logger("RUN: %s", zones[i].name);
 				} else if (!shouldRun && zones[i].mode == SCHD) {
 					zones[i].scheduleStop();
-					logger("Schedule: %s OFF", zones[i].name);
+					logger("RUN: %s", zones[i].name);
 				}
 
 				if (zones[i].isOverride()
@@ -367,7 +367,7 @@ void scheduleTask(void*) {
 					&& now >= zones[i].stopTime
 				) {
 					zones[i].disable();
-					logger("Override: %s auto-stopped", zones[i].name);
+					logger("OVERRIDE: %s", zones[i].name);
 				}
 			}
         vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -407,7 +407,7 @@ void initLog() {
 			if (f) f.close();
 		}
 	}
-	logger("Log ready: active=%s", LOG_FILES[logActive]);
+	logger("[log active: %s]", LOG_FILES[logActive]);
 }
 
 void appendLog(const char* line) {
@@ -429,8 +429,8 @@ size_t activeSize = fileSize(active);
 		if (z) z.close();
 		logActive = nextActive;
 		logPrefs.putUChar("active", logActive);
-		Serial.printf("LOG ROTATE -> cleared %s, active=%s\n",
-			LOG_FILES[nextActive], LOG_FILES[logActive]);
+		logger("[rotate log: %s\n, clr=%s]",
+			LOG_FILES[logActive], LOG_FILES[nextActive]);
 	}
 
 	xSemaphoreGive(logMutex);
@@ -465,29 +465,16 @@ void cmdResourceMonitor() {
     Serial.printf("  Headroom: %.1f KiB free, largest block %.1f KiB\n",
 			freeHeap, maxBlk);
 
-	// uptime
 	unsigned long upSec = millis() / 1000;
 	unsigned long upMin = upSec / 60;
 	unsigned long upHr  = upMin / 60;
 	Serial.printf("  Uptime:   %luh %lum %lus\n", 
 		upHr, upMin % 60, upSec % 60);
 
-	// LittleFS usage
 	float fsUsed  = LittleFS.usedBytes()  / 1024.0f;
 	float fsTotal = LittleFS.totalBytes() / 1024.0f;
 	Serial.printf("  FS used:  %.2f / %.2f KiB (%.1f%%)\n",
 		fsUsed, fsTotal, (fsUsed / fsTotal) * 100);
-}
-
-void cmdLogTest() {
-	logger("Starting synthetic fill test...");
-	for (int i = 0; i < 300; i++) {
-		char line[64];
-		snprintf(line, sizeof(line), "synth line %d, pad to target size", i);
-		logger(line);
-		vTaskDelay(10 / portTICK_PERIOD_MS);
-	}
-	logger("logtest complete: 300 lines");
 }
 
 void commandListener() {
@@ -496,9 +483,6 @@ void commandListener() {
 		cmd.trim();
 		if (cmd == "rsc") {
 			cmdResourceMonitor();
-		}
-		if (cmd == "lt") {
-			cmdLogTest();
 		}
 	}
 }
@@ -553,7 +537,7 @@ void initNTP(tm &timeinfo) {
 
 	while (!getLocalTime(&timeinfo)) {
 		if (millis() - start >= NTP_TIMEOUT) {
-			Serial.println(" timed out, continuing without sync");
+			Serial.println(" timeout, continuing without sync");
 			syncOkNTP = false;
 			return;
 		}
@@ -563,7 +547,7 @@ void initNTP(tm &timeinfo) {
 			timer = now;
 		}
 	}
-	Serial.println(&timeinfo, " synced, time now: %H:%M:%S");
+	Serial.println(&timeinfo, " sync OK (sanity: %H:%M:%S)");
 	syncOkNTP = true;
 }
 
@@ -575,14 +559,14 @@ void initMDNS() {
 
 void initLittleFS() {
 	if (!LittleFS.begin()) {
-		logger("LittleFS mount failed");
+		logger("! [mount fs FAILED]");
 		return;
 	}	
-	logger("LittleFS mounted");
+	logger("[mounted fs]");
 	initLog();
 	if (!LittleFS.exists("/save.json")) {
 		saveSchedule();
-		logger("/save.json initialized with defaults");
+		logger("[initialized default save.json]");
 	}
     loadSchedule();
 }
@@ -640,13 +624,13 @@ void initAPIRouting() {
 		if (idx == logActive) {
 			r->send(409, "application/json",
 				"{\"error\":\"refusing to clear active log\"}");
-			logger("Log delete REJECTED: %s is active", LOG_FILES[idx]);
+			logger("[log delete REJECTED: %s is active]", LOG_FILES[idx]);
 			return;
 		}
 		File f = LittleFS.open(LOG_FILES[idx], "w");
 		if (f) f.close();
 		r->send(200, "application/json", "{\"ok\":true}");
-		logger("Log cleared: %s", LOG_FILES[idx]);
+		logger("[cleared: %s]", LOG_FILES[idx]);
 	});
 
 	server.on("^\\/api\\/logs\\/last\\/(\\d+)$", HTTP_GET, [](Req *r) {
@@ -671,7 +655,6 @@ void initAPIRouting() {
 			}
 		}
 		
-		// if active file has enough, serve from it alone
 		if ((int)activeLines.size() >= count) {
 			String result;
 			int begin = (int)activeLines.size() - count;
@@ -682,7 +665,6 @@ void initAPIRouting() {
 			return;
 		}
 		
-		// need more: read inactive (older), then append active (newer)
 		Vector combined;
 		
 		f = LittleFS.open(LOG_FILES[1 - logActive], "r");
@@ -707,8 +689,8 @@ void initAPIRouting() {
 		
 		String result;
 		if ((int)combined.size() < count) {
-			result += "[[[ note: only " + String(combined.size()) +
-				" lines available (requested " + String(count) + ") ]]]\n";
+			result += "[NOTE: only " + String(combined.size()) +
+				" lines available (" + String(count) + " requested)]\n";
 		}
 		
 		int begin = max(0, (int)combined.size() - count);
@@ -734,7 +716,7 @@ void initAPIRouting() {
 		[](Req *r) {
 			if (!pwrOk24V()) {
 				r->send(503, "application/json", "{\"error\":\"24V not ready\"}");
-				logger("Zone enable rejected - 24VDC supply fault");
+				logger("[cmd failed: 24VDC supply FAULT]");
 				return;
 			}
 			r->send(200, "application/json", "{\"ok\":true}");
@@ -748,7 +730,7 @@ void initAPIRouting() {
 			deserializeJson(doc, data, len);
 			int duration = doc["duration"] | 120;
 			zones[id].enable(duration);
-			logger("%s ON, duration=%dmin", zones[id].name, duration);
+			logger("%s ON, %dmin", zones[id].name, duration);
 		}
 	);
 
@@ -770,7 +752,7 @@ void initAPIRouting() {
 			return;
 		}
 		zones[id].pause();
-		logger("%s paused until %02d:%02d",
+		logger("PAUSE %s exp=%02d:%02d",
 			zones[id].name,
 			zones[id].schedule.stopHour,
 			zones[id].schedule.stopMin);
@@ -784,7 +766,7 @@ void initAPIRouting() {
 			return;
 		}
 		zones[id].resume();
-		logger("%s resumed", zones[id].name);
+		logger("RESUME %s", zones[id].name);
 		r->send(200, "application/json", "{\"ok\":true}");
 	});
 
@@ -810,7 +792,7 @@ void initAPIRouting() {
 				}
 			}
 			saveSchedule();
-			logger("schedule modified, save.json updated");
+			logger("[schedule saved]");
 		}
 	);
 
@@ -866,7 +848,7 @@ void initAPIRouting() {
 		String filename = "/" + r->pathArg(0);
 		if (LittleFS.remove(filename)) {
 			r->send(200, "application/json", "{\"ok\":true}");
-			logger("Deleted file '%s'", filename.c_str());
+			logger("deleted '%s'", filename.c_str());
 		} else {
 			r->send(404, "application/json", "{\"error\":\"not found\"}");
 		}
@@ -876,7 +858,7 @@ void initAPIRouting() {
 		String filename = "/" + r->pathArg(0);
 		File f = LittleFS.open(filename, "w");
 		f.close();
-		logger("Cleared file '%s'", filename.c_str());
+		logger("[cleared '%s']", filename.c_str());
 		r->send(200, "application/json", "{\"ok\":true}");
 	});
 }
@@ -886,22 +868,24 @@ void initAPIRouting() {
 void setup() {
 	Serial.begin(115200);
 	xTaskCreate(ledTask, "LEDs", 2048, nullptr, 1, nullptr);
+	struct tm timeinfo;
 
 	initPins();
 	initWifi();
-	struct tm timeinfo;
 	initNTP(timeinfo);
-	initMDNS();
+	// initMDNS();
 	initLittleFS();
 	initAPIRouting();
 
 	server.begin();
 
-	logger("Webserver running on %s", WiFi.localIP().toString().c_str());
 	xTaskCreate(powerMonitorTask, "PWR", 4096, nullptr, 1, nullptr);
-	float startup = static_cast<float>(millis()) / 1000;
-	logger("Boot sequence took %.1f seconds", startup);
 	xTaskCreate(scheduleTask, "Schedule", 4096, nullptr, 1, nullptr);
+	float startup = static_cast<float>(millis()) / 1000;
+
+	logger("[server running: %s]", WiFi.localIP().toString().c_str());
+	logger("[wifi strength: %ddBm]", WiFi.RSSI());
+	logger("[bootup time: %.1fs]", startup);
 
 	Ok.on();
 	Warn.off();
