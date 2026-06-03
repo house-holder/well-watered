@@ -807,7 +807,7 @@ void initAPIRouting() {
 		heap["total"]    = total;
 		heap["peak"]     = peak;
 		heap["free"]     = freeHeap;
-		heap["maxBlock"] = maxBlk
+		heap["maxBlock"] = maxBlk;
 		JsonObject uptime = doc["uptime"].to<JsonObject>();
 		uptime["days"]    = (int)upDays;
 		uptime["hours"]   = (int)(upHr % 24);
