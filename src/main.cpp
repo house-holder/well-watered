@@ -504,6 +504,8 @@ void initPins() {
 
 void initWifi() {
 	Serial.printf("Connecting to network...");
+
+#ifndef DEV_ENV
 	IPAddress local(10, 0, 0, 20);
 	IPAddress gateway(10, 0, 0, 1);
 	IPAddress subnet(255, 255, 255, 0);
@@ -512,6 +514,8 @@ void initWifi() {
 	if (!WiFi.config(local, gateway, subnet, dns)) {
 		logger("WiFi.config failed, falling back to DHCP");
 	}
+#endif
+
 	WiFi.begin(WNET, WKEY);
 	unsigned long timer = 0;
 	while (WiFi.status() != WL_CONNECTED) {
