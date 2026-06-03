@@ -464,11 +464,12 @@ void cmdResourceMonitor() {
     Serial.printf("  Headroom: %.1f KiB free, largest block %.1f KiB\n",
 			freeHeap, maxBlk);
 
-	unsigned long upSec = millis() / 1000;
-	unsigned long upMin = upSec / 60;
-	unsigned long upHr  = upMin / 60;
-	Serial.printf("  Uptime:   %luh %lum %lus\n", 
-		upHr, upMin % 60, upSec % 60);
+	unsigned long upSec  = millis() / 1000;
+	unsigned long upMin  = upSec / 60;
+	unsigned long upHr   = upMin / 60;
+	unsigned long upDays = upHr / 24;
+	Serial.printf("  Uptime:   %lud %luh %lum %lus\n",
+		upDays, upHr % 24, upMin % 60, upSec % 60);
 
 	float fsUsed  = LittleFS.usedBytes()  / 1024.0f;
 	float fsTotal = LittleFS.totalBytes() / 1024.0f;
@@ -795,9 +796,10 @@ void initAPIRouting() {
 		float used     = total - freeHeap;
 		float peak     = total - minFree;
 
-		unsigned long upSec = millis() / 1000;
-		unsigned long upMin = upSec / 60;
-		unsigned long upHr  = upMin / 60;
+		unsigned long upSec  = millis() / 1000;
+		unsigned long upMin  = upSec / 60;
+		unsigned long upHr   = upMin / 60;
+		unsigned long upDays = upHr / 60;
 
 		JsonDocument doc;
 		JsonObject heap = doc["heap"].to<JsonObject>();
@@ -805,9 +807,10 @@ void initAPIRouting() {
 		heap["total"]    = total;
 		heap["peak"]     = peak;
 		heap["free"]     = freeHeap;
-		heap["maxBlock"] = maxBlk;
+		heap["maxBlock"] = maxBlk
 		JsonObject uptime = doc["uptime"].to<JsonObject>();
-		uptime["hours"]   = (int)upHr;
+		uptime["days"]    = (int)upDays;
+		uptime["hours"]   = (int)(upHr % 24);
 		uptime["minutes"] = (int)(upMin % 60);
 		uptime["seconds"] = (int)(upSec % 60);
 		JsonObject fs = doc["fs"].to<JsonObject>();
