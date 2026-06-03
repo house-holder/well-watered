@@ -14,14 +14,19 @@ async function loadResources() {
 
 		document.getElementById('res-heap-val').textContent =
 			`${fmt(h.used)} / ${fmt(h.total)} KiB (${heapPct}%)`;
+
 		document.getElementById('res-heap-bar').style.width =
 			`${heapPct}%`;
+
 		document.getElementById('res-peak-val').textContent =
 			`${fmt(h.peak)} KiB`;
+
 		document.getElementById('res-block-val').textContent =
 			`${fmt(h.maxBlock)} KiB`;
+
 		document.getElementById('res-fs-val').textContent =
 			`${fmt(f.used)} / ${fmt(f.total)} KiB (${fsPct}%)`;
+
 		document.getElementById('res-fs-bar').style.width = `${fsPct}%`;
 
 		const mm = String(u.minutes).padStart(2, '0');
@@ -39,11 +44,14 @@ async function loadResources() {
 	}
 }
 
-document.getElementById('res-refresh').addEventListener('click', loadResources);
-document.getElementById('res-auto').addEventListener('change', function() {
-	clearInterval(resInterval);
-	resInterval = this.checked ? setInterval(loadResources, 5000) : null;
-});
+document.getElementById('res-refresh')
+	.addEventListener('click', loadResources);
+
+document.getElementById('res-auto')
+	.addEventListener('change', function() {
+		clearInterval(resInterval);
+		resInterval = this.checked ? setInterval(loadResources, 5000) : null;
+	});
 
 // Log Viewer -----------------------------------------------------------------
 let logInterval = null;
@@ -60,12 +68,15 @@ async function loadLogs() {
 	}
 }
 
-document.getElementById('log-refresh').addEventListener('click', loadLogs);
-document.getElementById('log-count').addEventListener('change', loadLogs);
-document.getElementById('log-auto').addEventListener('change', function() {
-	clearInterval(logInterval);
-	logInterval = this.checked ? setInterval(loadLogs, 10000) : null;
-});
+document.getElementById('log-refresh')
+	.addEventListener('click', loadLogs);
+document.getElementById('log-count')
+	.addEventListener('change', loadLogs);
+document.getElementById('log-auto')
+	.addEventListener('change', function() {
+		clearInterval(logInterval);
+		logInterval = this.checked ? setInterval(loadLogs, 10000) : null;
+	});
 
 // Filesystem (includes log files) --------------------------------------------
 const LOG_FILE_NAMES = new Set(['/log0.txt', '/log1.txt']);
@@ -99,7 +110,7 @@ async function loadFS() {
 					row.innerHTML = `
 						<span class="file-name">${name}</span>
 						<span class="file-size">${sizeStr}</span>
-						<span class="badge-active">active</span>`;
+						<span class="badge-active">Active</span>`;
 				} else {
 					row.innerHTML = `
 						<span class="file-name">${name}</span>
@@ -135,7 +146,8 @@ async function loadFS() {
 	}
 }
 
-document.getElementById('fs-refresh').addEventListener('click', loadFS);
+document.getElementById('fs-refresh')
+	.addEventListener('click', loadFS);
 
 loadResources();
 loadLogs();
