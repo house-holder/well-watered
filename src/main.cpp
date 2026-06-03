@@ -22,7 +22,7 @@ using Req = AsyncWebServerRequest;
 const int DC_OK = 4;
 
 const char* LOG_FILES[2]     = { "/log0.txt", "/log1.txt" };
-const size_t LOG_CUTOFF = 25600; //bytes = 25KiB
+const size_t LOG_CUTOFF = 50 * 1024; // 50 KiB
 
 const char* ZONE_ENABLE  = "^\\/api\\/zones\\/(\\d+)\\/enable$";
 const char* ZONE_DISABLE = "^\\/api\\/zones\\/(\\d+)\\/disable$";
