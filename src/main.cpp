@@ -487,6 +487,51 @@ void commandListener() {
 	}
 }
 
+// Wifi helpers ---------------------------------------------------------------
+struct WifiNet {
+	const char* ssid;
+	const char* key;
+	bool useStatic;
+};
+
+const WifiNet WIFI_NETS[] = {
+	{ HOME_NET, HOME_KEY, true  },
+	{ CGI_NET, CGI_KEY, false },
+};
+
+const int WIFI_NET_COUNT = sizeof(WIFI_NETS) / sizeof(WIFI_NETS[0]);
+const unsigned long WIFI_ATTEMPT_MS = 5000;
+
+bool connectTo(const WifiNet& net) {
+	WiFi.disconnect();
+	delay(50);
+
+	if (net.useStatic) {
+		IPAddress local(10, 0, 0, 20);
+		IPAddress gateway(10, 0, 0, 1);
+		IPAddress subnet(255, 255, 255, 0);
+		IPAddress dns(10, 0, 0, 1);
+		WiFi.config(local, gateway, subnet, dns);
+	} else {
+		WiFi.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0),
+			IPAddress(0, 0, 0, 0));
+	}
+
+	Serial.printf("Trying %s", net.ssid);
+	WiFi.begin(net.ssid, net.key);
+
+	unsigned long start = millis();
+	while (WiFi.status() != WL_CONNECTED) {
+		if (millis() - start >= WIFI_ATTEMPT_MS) {
+			Serial.println(" - timeout");
+			return false;
+		}
+		Serial.print(".");
+		delay(250);
+	}
+	Serial.printf(" - connected, IP %s\n", WiFi.localIP().toString().c_str());
+	return true;
+}
 
 // Setup Functions ------------------------------------------------------------
 void initPins() {
@@ -503,30 +548,18 @@ void initPins() {
 }
 
 void initWifi() {
-	Serial.printf("Connecting to network...");
+	WiFi.mode(WIFI_STA);
 
-#ifndef DEV_ENV
-	IPAddress local(10, 0, 0, 20);
-	IPAddress gateway(10, 0, 0, 1);
-	IPAddress subnet(255, 255, 255, 0);
-	IPAddress dns(10, 0, 0, 1);
-
-	if (!WiFi.config(local, gateway, subnet, dns)) {
-		logger("WiFi.config failed, falling back to DHCP");
-	}
-#endif
-
-	WiFi.begin(WNET, WKEY);
-	unsigned long timer = 0;
-	while (WiFi.status() != WL_CONNECTED) {
-		unsigned long now = millis();
-		if (now - timer >= 500) {
-			Serial.print(".");
-			timer = now;
+	while (true) {
+		for (int i = 0; i < WIFI_NET_COUNT; i++) {
+			if (connectTo(WIFI_NETS[i])) {
+				Serial.printf("Connected: %s (%d dBm)\n",
+					WiFi.SSID().c_str(), WiFi.RSSI());
+				return;
+			}
 		}
+		Serial.println("No known networks reachable, retrying...");
 	}
-	Serial.printf(" success, connected to %s\n", WiFi.SSID().c_str());
-	Serial.printf("RSSI: %d dBm\n", WiFi.RSSI());
 }
 
 void initNTP(tm &timeinfo) {
