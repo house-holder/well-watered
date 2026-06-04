@@ -34,26 +34,6 @@ function updateClock() {
 	document.getElementById('clock').textContent = `${h}:${m}:${s} ${suffix}`;
 }
 
-function populateTimePickers() {
-	document.querySelectorAll('.t-hour').forEach(select => {
-		for (let i = 1; i <= 12; i++) {
-			const opt = document.createElement('option');
-			opt.value = i;
-			opt.textContent = i;
-			select.appendChild(opt);
-		}
-	});
-
-	document.querySelectorAll('.t-minute').forEach(select => {
-		for (let i = 0; i <= 59; i++) {
-			const opt = document.createElement('option');
-			opt.value = i;
-			opt.textContent = String(i).padStart(2, '0');
-			select.appendChild(opt);
-		}
-	});
-}
-
 function snapDown(mins) {
 	return Math.max(15, Math.floor(mins / 15) * 15);
 }
@@ -209,22 +189,18 @@ async function saveSchedule() {
 		const days = [...card.querySelectorAll('.day')]
 			.map(btn => btn.classList.contains('active'));
 
-		const startPicker = card.querySelector('.time-picker[data-type="start"]');
-		const startHour12 = parseInt(startPicker.querySelector('.t-hour').value);
-		const startMin = parseInt(startPicker.querySelector('.t-minute').value);
-		const startAmpm = startPicker.querySelector('.t-ampm').value;
-		const startHour = startAmpm === 'PM'
-			? (startHour12 % 12) + 12
-			: startHour12 % 12;
+		const startVal = card.querySelector(
+			'.time-input[data-type="start"]').value;
+		const [startHour, startMin] = startVal.split(':').map(Number);
 
-		const stopPicker = card.querySelector('.time-picker[data-type="stop"]');
-		const stopHour12 = parseInt(stopPicker.querySelector('.t-hour').value);
-		const stopMin = parseInt(stopPicker.querySelector('.t-minute').value);
-		const stopAmpm = stopPicker.querySelector('.t-ampm').value;
-		const stopHour = stopAmpm === 'PM'
-			? (stopHour12 % 12) + 12
-			: stopHour12 % 12;
-		payload.zones.push({ id, days, startHour, startMin, stopHour, stopMin });
+		const stopVal = card.querySelector(
+			'.time-input[data-type="stop"]').value;
+		const [stopHour, stopMin] = stopVal.split(':').map(Number);
+
+		if (!startVal || !stopVal) return;
+		payload.zones.push({
+			id, days, startHour, startMin, stopHour, stopMin
+		});
 	});
 
 	await fetch('/api/schedule/save', {
@@ -234,18 +210,17 @@ async function saveSchedule() {
 	});
 }
 
-function setTimePicker(picker, hour24, minute) {
-	const hour12 = hour24 % 12 || 12;
-	const ampm = hour24 >= 12 ? 'PM' : 'AM';
-	picker.querySelector('.t-ampm').value = ampm;
-	picker.querySelector('.t-hour').value = hour12;
-	picker.querySelector('.t-minute').value = minute;
+function setTimePicker(input, hour24, minute) {
+	const h = String(hour24).padStart(2, '0');
+	const m = String(minute).padStart(2, '0');
+	input.value = `${h}:${m}`;
 }
 
 function applySchedule(data) {
 	data.zones.forEach(zone => {
-		const s0 = `.zone-card[data-zone="${zone.id}"]`;
-		const card = document.querySelector(s0);
+		const card = document.querySelector(
+			`.zone-card[data-zone="${zone.id}"]`
+		);
 		if (!card) return;
 
 		const dayBtns = card.querySelectorAll('.day');
@@ -253,17 +228,18 @@ function applySchedule(data) {
 			dayBtns[index].classList.toggle('active', active);
 		});
 
-		const startPicker = card.querySelector('.time-picker[data-type="start"]');
-		const stopPicker = card.querySelector('.time-picker[data-type="stop"]');
-
-		setTimePicker(startPicker, zone.startHour, zone.startMin);
-		setTimePicker(stopPicker, zone.stopHour, zone.stopMin);
+		const startInput = card.querySelector(
+			'.time-input[data-type="start"]'
+		);
+		const stopInput = card.querySelector(
+			'.time-input[data-type="stop"]'
+		);
+		setTimePicker(startInput, zone.startHour, zone.startMin);
+		setTimePicker(stopInput, zone.stopHour, zone.stopMin);
 	});
 }
 
 async function init() {
-	populateTimePickers();
-
 	const data = await fetchState();
 	applyState(data);
 
@@ -358,8 +334,8 @@ async function init() {
 			});
 		});
 
-		card.querySelectorAll('.t-hour, .t-minute, .t-ampm').forEach(select => {
-			select.addEventListener('change', () => debounceScheduleSave());
+		card.querySelectorAll('.time-input').forEach(input => {
+			input.addEventListener('change', () => debounceScheduleSave());
 		});
 
 		card.querySelector('.minus').addEventListener('click', () => {
