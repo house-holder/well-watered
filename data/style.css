@@ -18,7 +18,7 @@ header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 1rem 0 1.5rem;
+    padding: 0.25rem 0rem 0.25rem 0.5rem;
 }
 
 h1 {
@@ -38,8 +38,8 @@ h1 {
 /* Zone Cards */
 .zone-card {
     background: #ffffff;
-    border-radius: 14px;
-    padding: 1.25rem;
+    border-radius: 10px;
+    padding: 0.5rem;
     margin-bottom: 1rem;
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
@@ -48,7 +48,7 @@ h1 {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 1rem;
+    margin-bottom: 0.25rem;
 }
 
 .zone-status {
@@ -92,8 +92,8 @@ h2 {
 /* Day Selector */
 .day-selector {
     display: flex;
-    gap: 0.3rem;
-    margin-bottom: 1rem;
+    gap: 0.75rem;
+    margin-bottom: 0.25rem;
 }
 
 .day {
@@ -164,8 +164,8 @@ h2 {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 1.25rem;
-    gap: 0.75rem;
+    margin-top: 0.25rem;
+    gap: 3rem;
 }
 
 /* Duration Picker */
