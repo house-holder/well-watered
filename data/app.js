@@ -6,22 +6,70 @@ const zoneState = [ // countdown grace period to enable
 
 const graceEnabled = false;
 const graceCountdown = 5;
-let saveTimer = null;
+const AUTOSAVE_SECONDS = 15;
+let saveCountdown = null;
+let saveTicker = null;
+let hideTimer = null;
 
-function debounceScheduleSave() {
-	clearTimeout(saveTimer);
-	saveTimer = setTimeout(() => {
-		saveTimer = null;
-		saveSchedule();
-	}, 8000);
+const saveBar = document.getElementById('save-bar');
+const saveStatus = document.getElementById('save-status');
+const saveNowBtn = document.getElementById('save-now');
+
+function renderSaveBar() {
+	if (saveCountdown === null) return;
+	saveStatus.textContent = `Unsaved changes · saving in ${saveCountdown}s`;
+}
+
+function markDirty() {
+	if (hideTimer !== null) {
+		clearTimeout(hideTimer);
+		hideTimer = null;
+	}
+
+	saveCountdown = AUTOSAVE_SECONDS;
+	saveBar.hidden = false;
+	saveNowBtn.hidden = false;
+	renderSaveBar();
+
+	if (saveTicker === null) {
+		saveTicker = setInterval(() => {
+			saveCountdown--;
+			if (saveCountdown <= 0) {
+				commitSave();
+			} else {
+				renderSaveBar();
+			}
+		}, 1000);
+	}
+}
+
+async function commitSave() {
+	if (saveTicker !== null) {
+		clearInterval(saveTicker);
+		saveTicker = null;
+	}
+	saveCountdown = null;
+
+	saveStatus.textContent = 'Saving…';
+	saveNowBtn.hidden = true;
+	await saveSchedule();
+
+	if (saveCountdown !== null) return;
+
+	saveStatus.textContent = 'Saved ✓';
+	hideTimer = setTimeout(() => {
+		saveBar.hidden = true;
+		hideTimer = null;
+	}, 2000);
 }
 
 function flushScheduleSave() {
-	if (saveTimer === null) return;   // nothing pending
-	clearTimeout(saveTimer);
-	saveTimer = null;
-	saveSchedule();
+	if (saveCountdown === null) return;
+	commitSave();
 }
+
+saveNowBtn.addEventListener('click', flushScheduleSave);
+
 
 // setup functions ------------------------------------------------------------
 function updateClock() {
@@ -116,16 +164,15 @@ function applyState(data) {
 			zoneState[zone.id].mode = zone.mode;
 
 			if (zone.mode === 'override' && zone.stopTime > 0) {
-				if (zoneState[zone.id].countdown) {
-					clearInterval(zoneState[zone.id].countdown);
-					zoneState[zone.id].countdown = null;
+				if (!zoneState[zone.id].countdown) {
+					const remaining = Math.max(
+						0, zone.stopTime - Math.floor(Date.now() / 1000)
+					);
+					startCountdown(card, zone.id, remaining);
 				}
-				const remaining = Math.max(
-					0, zone.stopTime - Math.floor(Date.now() / 1000)
-				);
-				startCountdown(card, zone.id, remaining);
+			} else {
+				clearCountdown(zone.id);
 			}
-
 		} else if (zone.mode === 'paused') {
 			badge.textContent = 'OFF';
 			badge.classList.remove('on');
@@ -133,7 +180,6 @@ function applyState(data) {
 			btn.textContent = 'Resume';
 			btn.classList.remove('active');
 			zoneState[zone.id].mode = 'paused';
-
 		} else {
 			badge.textContent = 'OFF';
 			badge.classList.remove('on');
@@ -142,7 +188,6 @@ function applyState(data) {
 			btn.classList.remove('active');
 			zoneState[zone.id].mode = 'idle';
 		}
-
 		updatePickerUI(card, zone.id);
 	});
 }
@@ -174,6 +219,13 @@ function startCountdown(card, zoneId, initialSeconds) {
 			updatePickerUI(card, zoneId);
 		}
 	}, 1000);
+}
+
+function clearCountdown(zoneId) {
+	if (zoneState[zoneId].countdown) {
+		clearInterval(zoneState[zoneId].countdown);
+		zoneState[zoneId].countdown = null;
+	}
 }
 
 async function fetchSchedule() {
@@ -330,12 +382,12 @@ async function init() {
 		card.querySelectorAll('.day').forEach(btn => {
 			btn.addEventListener('click', () => {
 				btn.classList.toggle('active');
-				debounceScheduleSave();
+				markDirty();
 			});
 		});
 
 		card.querySelectorAll('.time-input').forEach(input => {
-			input.addEventListener('change', () => debounceScheduleSave());
+			input.addEventListener('change', () => markDirty());
 		});
 
 		card.querySelector('.minus').addEventListener('click', () => {
@@ -377,6 +429,12 @@ document.getElementById('clock-wrap').addEventListener('click', (e) => {
 });
 document.addEventListener('click', () => { clockMenu.hidden = true; });
 
+const POLL_SECONDS = 3;
 init();
 updateClock();
+setInterval(() => {
+	if (document.visibilityState === 'visible') {
+		fetchState().then(applyState);
+	}
+}, POLL_SECONDS * 1000);
 setInterval(updateClock, 1000);
