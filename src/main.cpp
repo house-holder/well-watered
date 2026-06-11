@@ -79,6 +79,23 @@ struct StatLED {
 StatLED Ok = { 14, 1000, 4000, OFF, 0 };
 StatLED Warn = { 13, 100, 400, FLASH, 0 };
 
+struct Uptime {
+	unsigned long days;
+	unsigned long hours;
+	unsigned long minutes;
+	unsigned long seconds;
+};
+
+Uptime getUptime() {
+	unsigned long s = millis() / 1000;
+	return {
+		s / 86400,
+		(s / 3600) % 24,
+		(s / 60) % 60,
+		s % 60
+	};
+}
+
 struct Schedule {
 	bool days[7];
 	int startHour;
@@ -464,12 +481,9 @@ void cmdResourceMonitor() {
     Serial.printf("  Headroom: %.1f KiB free, largest block %.1f KiB\n",
 			freeHeap, maxBlk);
 
-	unsigned long upSec  = millis() / 1000;
-	unsigned long upMin  = upSec / 60;
-	unsigned long upHr   = upMin / 60;
-	unsigned long upDays = upHr / 24;
+	Uptime u = getUptime();
 	Serial.printf("  Uptime:   %lud %luh %lum %lus\n",
-		upDays, upHr % 24, upMin % 60, upSec % 60);
+		u.days, u.hours, u.minutes, u.seconds);
 
 	float fsUsed  = LittleFS.usedBytes()  / 1024.0f;
 	float fsTotal = LittleFS.totalBytes() / 1024.0f;
@@ -826,36 +840,33 @@ void initAPIRouting() {
 	);
 
 	server.on("/api/resources", HTTP_GET, [](Req *r) {
-		float total    = ESP.getHeapSize()     / 1024.0f;
-		float freeHeap = ESP.getFreeHeap()     / 1024.0f;
-		float minFree  = ESP.getMinFreeHeap()  / 1024.0f;
-		float maxBlk   = ESP.getMaxAllocHeap() / 1024.0f;
-		float used     = total - freeHeap;
-		float peak     = total - minFree;
-
-		unsigned long upSec  = millis() / 1000;
-		unsigned long upMin  = upSec / 60;
-		unsigned long upHr   = upMin / 60;
-		unsigned long upDays = upHr / 60;
-
+		String output;
 		JsonDocument doc;
-		JsonObject heap = doc["heap"].to<JsonObject>();
-		heap["used"]     = used;
-		heap["total"]    = total;
-		heap["peak"]     = peak;
-		heap["free"]     = freeHeap;
-		heap["maxBlock"] = maxBlk;
-		JsonObject uptime = doc["uptime"].to<JsonObject>();
-		uptime["days"]    = (int)upDays;
-		uptime["hours"]   = (int)(upHr % 24);
-		uptime["minutes"] = (int)(upMin % 60);
-		uptime["seconds"] = (int)(upSec % 60);
-		JsonObject fs = doc["fs"].to<JsonObject>();
-		fs["used"]  = LittleFS.usedBytes()  / 1024.0f;
-		fs["total"] = LittleFS.totalBytes() / 1024.0f;
-		String out;
-		serializeJson(doc, out);
-		r->send(200, "application/json", out);
+		Uptime u		= getUptime();
+		float total		= ESP.getHeapSize()     / 1024.0f;
+		float freeHeap	= ESP.getFreeHeap()     / 1024.0f;
+		float minFree	= ESP.getMinFreeHeap()  / 1024.0f;
+		float maxBlk	= ESP.getMaxAllocHeap() / 1024.0f;
+		float used		= total - freeHeap;
+		float peak		= total - minFree;
+
+		JsonObject heap		= doc["heap"].to<JsonObject>();
+		heap["used"]        = used;
+		heap["total"]       = total;
+		heap["peak"]        = peak;
+		heap["free"]        = freeHeap;
+		heap["maxBlock"]    = maxBlk;
+		JsonObject uptime   = doc["uptime"].to<JsonObject>();
+		uptime["days"]      = u.days;
+		uptime["hours"]     = u.hours;
+		uptime["minutes"]   = u.minutes;
+		uptime["seconds"]   = u.seconds;
+		JsonObject fs		= doc["fs"].to<JsonObject>();
+		fs["used"]			= LittleFS.usedBytes()  / 1024.0f;
+		fs["total"]			= LittleFS.totalBytes() / 1024.0f;
+
+		serializeJson(doc, output);
+		r->send(200, "application/json", output);
 	});
 
 	server.on("/api/fs", HTTP_GET, [](Req *r) {
